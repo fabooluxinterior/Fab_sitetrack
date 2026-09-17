@@ -293,7 +293,7 @@
 
         function CheckInFlow({ db, currentUser, goBack, showToast }) {
             const [step, setStep] = useState(1);
-            const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
+            const [formData, setFormData] = useState({ siteName: 'PJ-', locationDetails: '', workers: '' });
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
             const [showSuggestions, setShowSuggestions] = useState(false);
@@ -320,6 +320,15 @@
 
             const filteredSites = recentUniqueSites.filter(s => s.siteName.toLowerCase().includes(formData.siteName.toLowerCase()));
 
+            const handleSiteNameChange = (e) => {
+                let val = e.target.value.toUpperCase();
+                if (!val.startsWith('PJ-')) {
+                    val = 'PJ-' + val.replace(/^P?J?-?/i, '');
+                }
+                setFormData({...formData, siteName: val});
+                setShowSuggestions(true);
+            };
+
             const handleFinalSubmit = () => {
                 const newSite = {
                     id: Date.now().toString(), coordinatorId: currentUser.id, coordinatorName: currentUser.name,
@@ -345,16 +354,16 @@
                                 <div><h2 class="text-2xl font-extrabold text-slate-900 mb-1">Site Details</h2></div>
                                 
                                 <div class="relative">
-                                    <label class="block text-sm font-bold mb-2 text-slate-700">Site Name (Search & Select)</label>
+                                    <label class="block text-sm font-bold mb-2 text-slate-700">Site Name</label>
                                     <div class="relative">
-                                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                                        <i class="fa-solid fa-clipboard-list absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
                                         <input required type="text" 
-                                            class="w-full py-3 pl-10 pr-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" 
+                                            class="w-full py-3 pl-10 pr-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition uppercase" 
                                             value={formData.siteName} 
-                                            onChange={e => { setFormData({...formData, siteName: e.target.value}); setShowSuggestions(true); }}
+                                            onChange={handleSiteNameChange}
                                             onFocus={() => setShowSuggestions(true)}
                                             onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-                                            placeholder="Search past sites or enter new..."
+                                            placeholder="PJ-001 PROJECT NAME"
                                             autoComplete="off"
                                         />
                                     </div>
@@ -593,23 +602,39 @@
             );
         }
 
+        // GROUPING LOGIC FOR DASHBOARD & HISTORICAL LOGS
         function DashboardView({ db }) {
             const todayStr = new Date().toISOString().split('T')[0];
-            const todayVisits = db.logs.filter(l => l.checkInTime?.startsWith(todayStr)).length;
-            const totalWorkers = db.activeSites.reduce((sum, site) => sum + (parseInt(site.workers)||0), 0);
-            const [selectedLog, setSelectedLog] = useState(null);
+            const [selectedGroup, setSelectedGroup] = useState(null);
             
-            const liveFeed = [
-                ...db.activeSites.map(s => ({...s, status: 'On-site', sortTime: s.checkInTime})),
-                ...db.logs.filter(l => l.checkInTime?.startsWith(todayStr)).map(l => ({...l, status: 'Departed', sortTime: l.checkOutTime}))
-            ].sort((a,b) => new Date(b.sortTime) - new Date(a.sortTime));
+            const rawActive = db.activeSites;
+            const rawCompletedToday = db.logs.filter(l => l.checkInTime?.startsWith(todayStr));
+            
+            const dashMap = {};
+            rawActive.forEach(log => {
+                const key = `${log.siteName}::${log.coordinatorId}`;
+                if(!dashMap[key]) dashMap[key] = { siteName: log.siteName, coordinatorName: log.coordinatorName, visits: [], status: 'On-site', sortTime: log.checkInTime };
+                dashMap[key].visits.push(log);
+                dashMap[key].status = 'On-site'; 
+                if (new Date(log.checkInTime) > new Date(dashMap[key].sortTime)) dashMap[key].sortTime = log.checkInTime;
+            });
+            rawCompletedToday.forEach(log => {
+                const key = `${log.siteName}::${log.coordinatorId}`;
+                if(!dashMap[key]) dashMap[key] = { siteName: log.siteName, coordinatorName: log.coordinatorName, visits: [], status: 'Departed', sortTime: log.checkInTime };
+                dashMap[key].visits.push(log);
+                if (new Date(log.checkInTime) > new Date(dashMap[key].sortTime)) dashMap[key].sortTime = log.checkInTime;
+            });
+
+            const liveFeed = Object.values(dashMap).sort((a,b) => new Date(b.sortTime) - new Date(a.sortTime));
+            const todayVisitsCount = liveFeed.length;
+            const totalWorkers = db.activeSites.reduce((sum, site) => sum + (parseInt(site.workers)||0), 0);
 
             return (
                 <div class="max-w-6xl mx-auto animate-fade-in">
                     <div class="mb-8"><h2 class="text-2xl font-extrabold text-slate-900 mb-1">Live Dashboard</h2></div>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                         <StatCard icon="fa-building" label="Active Sites" value={db.activeSites.length} iconBg="text-primary bg-indigo-50" />
-                        <StatCard icon="fa-calendar-check" label="Today's Visits" value={todayVisits} iconBg="text-blue-500 bg-blue-50" />
+                        <StatCard icon="fa-calendar-check" label="Today's Sites Visited" value={todayVisitsCount} iconBg="text-blue-500 bg-blue-50" />
                         <StatCard icon="fa-users" label="Total Workers" value={totalWorkers} iconBg="text-amber-500 bg-amber-50" />
                     </div>
 
@@ -625,23 +650,23 @@
                             <table class="w-full text-left whitespace-nowrap">
                                 <thead>
                                     <tr class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase border-b border-slate-100">
-                                        <th class="p-4 pl-6">Coordinator Name</th>
-                                        <th class="p-4">Site Name</th>
-                                        <th class="p-4">Time</th>
+                                        <th class="p-4 pl-6">Site Name</th>
+                                        <th class="p-4">Coordinator</th>
+                                        <th class="p-4 text-center">Visits Count</th>
                                         <th class="p-4">Status</th>
                                         <th class="p-4 text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {liveFeed.length === 0 && <tr><td colSpan="5" class="p-8 text-center text-slate-400 text-sm">No activity recorded today.</td></tr>}
-                                    {liveFeed.map((item, idx) => (
+                                    {liveFeed.map((group, idx) => (
                                         <tr key={idx} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
-                                            <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{item.coordinatorName}</td>
-                                            <td class="p-4 font-bold text-slate-800 text-sm">{item.siteName}</td>
-                                            <td class="p-4 text-sm text-slate-600 font-medium">{new Date(item.sortTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td>
-                                            <td class="p-4"><span class={`px-2.5 py-1 rounded-md text-xs font-bold border ${item.status==='On-site' ? 'bg-[#e6fcf0] text-emerald-700 border-[#a3f0c9]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{item.status}</span></td>
+                                            <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{group.siteName}</td>
+                                            <td class="p-4 font-bold text-slate-800 text-sm">{group.coordinatorName}</td>
+                                            <td class="p-4 text-center text-sm font-black text-primary bg-indigo-50/30">{group.visits.length}</td>
+                                            <td class="p-4"><span class={`px-2.5 py-1 rounded-md text-xs font-bold border ${group.status==='On-site' ? 'bg-[#e6fcf0] text-emerald-700 border-[#a3f0c9]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{group.status}</span></td>
                                             <td class="p-4 text-center">
-                                                <button onClick={() => setSelectedLog(item)} class="text-primary font-bold text-xs bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View Details</button>
+                                                <button onClick={() => setSelectedGroup(group)} class="text-primary font-bold text-xs bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View History</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -649,12 +674,11 @@
                             </table>
                         </div>
                     </div>
-                    {selectedLog && <LogDetailsModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
+                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} />}
                 </div>
             );
         }
 
-        // --- NEW ATTENDANCE VIEW ---
         function AttendanceView({ db }) {
             const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
 
@@ -737,14 +761,33 @@
         function LogsView({ db }) {
             const [filterName, setFilterName] = useState('');
             const [filterDate, setFilterDate] = useState('');
-            const [selectedLog, setSelectedLog] = useState(null);
+            const [selectedGroup, setSelectedGroup] = useState(null);
 
-            const filteredLogs = db.logs.filter(log => {
-                const matchName = log.coordinatorName?.toLowerCase().includes(filterName.toLowerCase());
+            const rawFiltered = db.logs.filter(log => {
+                const matchName = log.coordinatorName?.toLowerCase().includes(filterName.toLowerCase()) || log.siteName?.toLowerCase().includes(filterName.toLowerCase());
                 const logDate = log.checkInTime ? new Date(log.checkInTime).toISOString().split('T')[0] : '';
                 const matchDate = filterDate ? logDate === filterDate : true;
                 return matchName && matchDate;
-            }).sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime));
+            });
+
+            const groupedMap = {};
+            rawFiltered.forEach(log => {
+                const key = `${log.siteName}::${log.coordinatorId}`;
+                if (!groupedMap[key]) {
+                    groupedMap[key] = {
+                        siteName: log.siteName,
+                        coordinatorName: log.coordinatorName,
+                        latestTime: log.checkInTime,
+                        visits: []
+                    };
+                }
+                groupedMap[key].visits.push(log);
+                if (new Date(log.checkInTime) > new Date(groupedMap[key].latestTime)) {
+                    groupedMap[key].latestTime = log.checkInTime;
+                }
+            });
+
+            const groupedLogs = Object.values(groupedMap).sort((a,b) => new Date(b.latestTime) - new Date(a.latestTime));
 
             return (
                 <div class="max-w-6xl mx-auto animate-fade-in">
@@ -757,7 +800,7 @@
                             <input type="date" class="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 focus:border-primary outline-none" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
                             <div class="relative w-full sm:w-64">
                                 <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 text-sm"></i>
-                                <input type="text" placeholder="Filter by Name..." class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-primary outline-none" value={filterName} onChange={e => setFilterName(e.target.value)} />
+                                <input type="text" placeholder="Search Sites or Names..." class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-primary outline-none" value={filterName} onChange={e => setFilterName(e.target.value)} />
                             </div>
                         </div>
                     </div>
@@ -766,76 +809,97 @@
                         <table class="w-full text-left whitespace-nowrap">
                             <thead class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase border-b border-slate-100">
                                 <tr>
-                                    <th class="p-4 pl-6">Date</th>
-                                    <th class="p-4">Coordinator</th>
+                                    <th class="p-4 pl-6">Last Visited Date</th>
                                     <th class="p-4">Site Visited</th>
+                                    <th class="p-4">Coordinator</th>
+                                    <th class="p-4 text-center">Total Visits</th>
                                     <th class="p-4 text-center">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {filteredLogs.length === 0 && <tr><td colSpan="4" class="p-8 text-center text-slate-400 text-sm">No records found matching filters.</td></tr>}
-                                {filteredLogs.map(log => (
-                                    <tr key={log.id} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
-                                        <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{new Date(log.checkInTime).toLocaleDateString()}</td>
-                                        <td class="p-4 font-bold text-sm text-slate-800">{log.coordinatorName}</td>
-                                        <td class="p-4 font-bold text-slate-800 text-sm">{log.siteName}</td>
-                                        <td class="p-4 text-center"><button onClick={() => setSelectedLog(log)} class="text-primary font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">View Details</button></td>
+                                {groupedLogs.length === 0 && <tr><td colSpan="5" class="p-8 text-center text-slate-400 text-sm">No records found matching filters.</td></tr>}
+                                {groupedLogs.map((group, idx) => (
+                                    <tr key={idx} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
+                                        <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{new Date(group.latestTime).toLocaleDateString()}</td>
+                                        <td class="p-4 font-bold text-slate-800 text-sm">{group.siteName}</td>
+                                        <td class="p-4 font-bold text-sm text-slate-800">{group.coordinatorName}</td>
+                                        <td class="p-4 text-center text-sm font-black text-primary bg-indigo-50/30">{group.visits.length}</td>
+                                        <td class="p-4 text-center"><button onClick={() => setSelectedGroup(group)} class="text-primary font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">View History</button></td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                    {selectedLog && <LogDetailsModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
+                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} />}
                 </div>
             );
         }
 
-        function LogDetailsModal({ log, onClose }) {
+        function LogDetailsModal({ group, onClose }) {
             const downloadPDF = () => {
                 const element = document.getElementById('pdf-report-content');
-                html2pdf().set({ margin: 0.5, filename: `SiteReport_${log.siteName.replace(/\s+/g,'_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' } }).from(element).save();
+                html2pdf().set({ margin: 0.5, filename: `SiteHistory_${group.siteName.replace(/\s+/g,'_')}.pdf`, image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2, useCORS: true }, jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' } }).from(element).save();
             };
+
+            const sortedVisits = [...group.visits].sort((a,b) => new Date(a.checkInTime) - new Date(b.checkInTime));
 
             return (
                 <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-                    <div class="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl">
+                    <div class="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl">
                         <div class="flex justify-between items-center p-5 border-b border-slate-100">
-                            <h3 class="text-lg font-extrabold text-slate-900">Visit Report</h3>
+                            <h3 class="text-lg font-extrabold text-slate-900">Site History Report</h3>
                             <div class="flex gap-2">
                                 <button onClick={downloadPDF} class="bg-primary text-white px-3 py-1.5 rounded-lg font-bold hover:bg-primaryHover text-sm shadow"><i class="fa-solid fa-download mr-1"></i> PDF</button>
                                 <button onClick={onClose} class="text-slate-400 hover:text-slate-800 bg-slate-100 px-3 py-1.5 rounded-lg"><i class="fa-solid fa-times"></i></button>
                             </div>
                         </div>
                         <div id="pdf-report-content" class="p-6 overflow-y-auto">
-                            <h2 class="text-2xl font-black mb-1 text-slate-900">{log.siteName}</h2>
-                            <p class="text-slate-500 text-sm mb-6 pb-4 border-b border-slate-100">Coordinator: {log.coordinatorName} | Workers: {log.workers}</p>
+                            <h2 class="text-3xl font-black mb-1 text-slate-900">{group.siteName}</h2>
+                            <p class="text-slate-500 text-sm mb-6 pb-4 border-b border-slate-100">
+                                Coordinator: <span class="font-bold text-slate-800">{group.coordinatorName}</span> &nbsp;|&nbsp; 
+                                Total Visits: <span class="font-bold text-slate-800">{group.visits.length}</span>
+                            </p>
                             
-                            <div class="grid sm:grid-cols-2 gap-6">
-                                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-In</h4>
-                                    <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkInTime).toLocaleString('en-US')}</p>
-                                    <img src={log.checkInPhoto} class="w-full h-48 object-cover object-center rounded-lg mb-3 shadow-sm border border-slate-200" />
-                                    <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
-                                </div>
-                                <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                                    <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-Out</h4>
-                                    {log.checkOutTime ? (
-                                        <>
-                                            <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkOutTime).toLocaleString('en-US')}</p>
-                                            <img src={log.checkOutPhoto} class="w-full h-48 object-cover object-center rounded-lg mb-3 shadow-sm border border-slate-200" />
-                                            <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
-                                        </>
-                                    ) : (
-                                        <div class="flex flex-col items-center justify-center h-48 text-slate-400">
-                                            <i class="fa-solid fa-clock-rotate-left text-3xl mb-2"></i>
-                                            <p class="text-sm font-medium italic">User is still on-site</p>
+                            <div class="space-y-8">
+                                {sortedVisits.map((log, index) => (
+                                    <div key={log.id} class="break-inside-avoid">
+                                        <div class="flex items-center gap-3 mb-4">
+                                            <div class="bg-primary text-white w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs">{index + 1}</div>
+                                            <h4 class="font-extrabold text-slate-800">Visit on {new Date(log.checkInTime).toLocaleDateString()}</h4>
                                         </div>
-                                    )}
-                                </div>
-                            </div>
-                            <div class="mt-6 bg-amber-50 border border-amber-100 p-4 rounded-xl">
-                                <p class="text-xs font-bold text-amber-800 mb-1 uppercase">Closing Remarks</p>
-                                <p class="text-slate-800 text-sm font-medium">{log.notes || (log.checkOutTime ? 'None provided.' : 'Pending check-out.')}</p>
+                                        
+                                        <div class="grid sm:grid-cols-2 gap-6 ml-9">
+                                            <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                                <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-In</h4>
+                                                <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkInTime).toLocaleString('en-US')}</p>
+                                                <div class="w-full h-48 bg-slate-100 rounded-lg mb-3 shadow-inner border border-slate-200 flex items-center justify-center overflow-hidden">
+                                                    <img src={log.checkInPhoto} class="max-w-full max-h-full" style={{ width: 'auto', height: 'auto' }} />
+                                                </div>
+                                                <p class="text-xs text-slate-500 font-medium mb-1"><i class="fa-solid fa-users mr-1"></i> Workers: {log.workers}</p>
+                                                <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
+                                            </div>
+                                            <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                                <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-Out</h4>
+                                                {log.checkOutTime ? (
+                                                    <>
+                                                        <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkOutTime).toLocaleString('en-US')}</p>
+                                                        <div class="w-full h-48 bg-slate-100 rounded-lg mb-3 shadow-inner border border-slate-200 flex items-center justify-center overflow-hidden">
+                                                            <img src={log.checkOutPhoto} class="max-w-full max-h-full" style={{ width: 'auto', height: 'auto' }} />
+                                                        </div>
+                                                        <p class="text-xs text-slate-800 font-medium mb-1 truncate"><i class="fa-solid fa-comment-dots mr-1 text-slate-400"></i> {log.notes || 'No remarks'}</p>
+                                                        <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
+                                                    </>
+                                                ) : (
+                                                    <div class="flex flex-col items-center justify-center h-full min-h-[12rem] text-slate-400">
+                                                        <i class="fa-solid fa-clock-rotate-left text-3xl mb-2"></i>
+                                                        <p class="text-sm font-medium italic">User is still on-site</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                        {index < sortedVisits.length - 1 && <hr class="mt-8 border-slate-200" />}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     </div>
