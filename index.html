@@ -43,7 +43,7 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef } = React;
+        const { useState, useEffect, useRef, useMemo } = React;
 
         // ------------------------------------------------------------
         // ACTIVE GOOGLE APPS SCRIPT WEB APP URL
@@ -66,7 +66,7 @@
             useEffect(() => { localStorage.setItem('st_users', JSON.stringify(users)); }, [users]);
             useEffect(() => { 
                 if (currentUser) localStorage.setItem('st_cur_user', JSON.stringify(currentUser));
-                else localStorage.removeItem('st_cur_user'); // Only clears when manually set to null (logged out)
+                else localStorage.removeItem('st_cur_user'); 
             }, [currentUser]);
 
             const syncFromGoogleSheet = async (silent = false) => {
@@ -100,11 +100,10 @@
                 }).catch(e => console.error("Sheet push queued:", e));
             };
 
-            // Background Auto-Sync System
             useEffect(() => { 
                 syncFromGoogleSheet(false);
-                const interval = setInterval(() => syncFromGoogleSheet(true), 15000); // Polling every 15 seconds
-                const onFocus = () => syncFromGoogleSheet(true); // Poll when browser regains focus
+                const interval = setInterval(() => syncFromGoogleSheet(true), 15000); 
+                const onFocus = () => syncFromGoogleSheet(true); 
                 window.addEventListener('focus', onFocus);
                 return () => { clearInterval(interval); window.removeEventListener('focus', onFocus); };
             }, []);
@@ -112,7 +111,6 @@
             return { logs, setLogs, activeSites, setActiveSites, users, setUsers, currentUser, setCurrentUser, pushToGoogleSheet, syncFromGoogleSheet, isSyncing };
         };
 
-        // --- GLOBAL TOAST COMPONENT ---
         function ToastNotification({ toast, onClose }) {
             useEffect(() => {
                 if (toast) { const timer = setTimeout(onClose, 3500); return () => clearTimeout(timer); }
@@ -120,16 +118,8 @@
 
             if (!toast) return null;
 
-            const styles = {
-                success: 'bg-emerald-600 border-emerald-700',
-                error: 'bg-red-600 border-red-700',
-                warning: 'bg-amber-500 border-amber-600'
-            };
-            const icons = {
-                success: 'fa-circle-check',
-                error: 'fa-circle-exclamation',
-                warning: 'fa-triangle-exclamation'
-            };
+            const styles = { success: 'bg-emerald-600 border-emerald-700', error: 'bg-red-600 border-red-700', warning: 'bg-amber-500 border-amber-600' };
+            const icons = { success: 'fa-circle-check', error: 'fa-circle-exclamation', warning: 'fa-triangle-exclamation' };
 
             return (
                 <div class={`fixed top-4 left-1/2 w-[90%] max-w-sm z-[999] animate-slide-down text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border ${styles[toast.type]}`}>
@@ -160,7 +150,6 @@
         function App() {
             const db = useDatabase();
             const [toast, setToast] = useState(null);
-            
             const showToast = (message, type = 'success') => setToast({ message, type });
 
             return (
@@ -185,9 +174,7 @@
                     window.location.hash = 'dashboard';
                     db.setCurrentUser(user);
                     showToast(`Welcome back, ${user.name}!`, "success");
-                } else {
-                    showToast("Invalid email or password.", "error");
-                }
+                } else { showToast("Invalid email or password.", "error"); }
             };
 
             return (
@@ -309,6 +296,29 @@
             const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
+            const [showSuggestions, setShowSuggestions] = useState(false);
+
+            const recentUniqueSites = useMemo(() => {
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() - 15);
+                
+                const allVisits = [...db.logs, ...db.activeSites]
+                    .filter(v => String(v.coordinatorId) === String(currentUser.id) && new Date(v.checkInTime) >= cutoff)
+                    .sort((a, b) => new Date(b.checkInTime) - new Date(a.checkInTime));
+                
+                const unique = [];
+                const seen = new Set();
+                for (const v of allVisits) {
+                    const nameLower = (v.siteName || "").toLowerCase().trim();
+                    if (!seen.has(nameLower) && nameLower !== "") {
+                        seen.add(nameLower);
+                        unique.push({ siteName: v.siteName, locationDetails: v.locationDetails });
+                    }
+                }
+                return unique;
+            }, [db.logs, db.activeSites, currentUser.id]);
+
+            const filteredSites = recentUniqueSites.filter(s => s.siteName.toLowerCase().includes(formData.siteName.toLowerCase()));
 
             const handleFinalSubmit = () => {
                 const newSite = {
@@ -333,10 +343,44 @@
                         {step === 1 ? (
                             <form onSubmit={(e) => { e.preventDefault(); setStep(2); }} class="space-y-6">
                                 <div><h2 class="text-2xl font-extrabold text-slate-900 mb-1">Site Details</h2></div>
-                                <div>
-                                    <label class="block text-sm font-bold mb-2 text-slate-700">Site Name</label>
-                                    <input required type="text" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.siteName} onChange={e => setFormData({...formData, siteName: e.target.value})} />
+                                
+                                <div class="relative">
+                                    <label class="block text-sm font-bold mb-2 text-slate-700">Site Name (Search & Select)</label>
+                                    <div class="relative">
+                                        <i class="fa-solid fa-magnifying-glass absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                                        <input required type="text" 
+                                            class="w-full py-3 pl-10 pr-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" 
+                                            value={formData.siteName} 
+                                            onChange={e => { setFormData({...formData, siteName: e.target.value}); setShowSuggestions(true); }}
+                                            onFocus={() => setShowSuggestions(true)}
+                                            onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                                            placeholder="Search past sites or enter new..."
+                                            autoComplete="off"
+                                        />
+                                    </div>
+                                    
+                                    {showSuggestions && filteredSites.length > 0 && (
+                                        <div class="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                                            <div class="px-3 py-2 bg-slate-50 border-b border-slate-100 text-[10px] font-bold text-slate-500 uppercase sticky top-0 z-10 tracking-wider flex justify-between">
+                                                <span>Recent Sites (Last 15 Days)</span>
+                                            </div>
+                                            {filteredSites.map((site, idx) => (
+                                                <div key={idx} 
+                                                    onClick={(e) => { 
+                                                        e.preventDefault(); 
+                                                        setFormData({...formData, siteName: site.siteName, locationDetails: site.locationDetails}); 
+                                                        setShowSuggestions(false); 
+                                                    }}
+                                                    class="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 last:border-0 transition"
+                                                >
+                                                    <p class="font-bold text-slate-800 text-sm">{site.siteName}</p>
+                                                    <p class="text-xs text-slate-500 truncate">{site.locationDetails}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
+
                                 <div>
                                     <label class="block text-sm font-bold mb-2 text-slate-700">Location / Zone</label>
                                     <input required type="text" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.locationDetails} onChange={e => setFormData({...formData, locationDetails: e.target.value})} />
@@ -397,7 +441,6 @@
             );
         }
 
-        // --- CAMERA WITH STRICT GPS ENFORCEMENT & POPUP OVERLAY ---
         function CameraAndLocation({ onCapture, showToast }) {
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -413,9 +456,7 @@
                     const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
                     setStream(mediaStream);
                     if (videoRef.current) videoRef.current.srcObject = mediaStream;
-                } catch (err) {
-                    showToast("Camera access denied. Check your browser permissions.", "error");
-                }
+                } catch (err) { showToast("Camera access denied. Check your browser permissions.", "error"); }
             };
 
             const stopCamera = () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
@@ -425,13 +466,11 @@
                     showToast("Geolocation is not supported by your browser.", "error");
                     return;
                 }
-
                 setLoadingGeo(true);
                 setGpsError(false);
 
                 navigator.geolocation.getCurrentPosition(
                     (position) => {
-                        // GPS Success! Now capture the photo
                         const canvas = canvasRef.current;
                         const video = videoRef.current;
                         canvas.width = 360; 
@@ -439,16 +478,10 @@
                         canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
                         const imgData = canvas.toDataURL('image/jpeg', 0.5); 
                         
-                        setCapturedImg(imgData); 
-                        stopCamera();
-                        setLoadingGeo(false);
+                        setCapturedImg(imgData); stopCamera(); setLoadingGeo(false);
                         onCapture(imgData, { lat: position.coords.latitude, lng: position.coords.longitude });
                     },
-                    (error) => {
-                        // GPS Failed! Stop capture and show interactive overlay.
-                        setLoadingGeo(false);
-                        setGpsError(true);
-                    },
+                    (error) => { setLoadingGeo(false); setGpsError(true); },
                     { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
                 );
             };
@@ -470,7 +503,6 @@
                     <video ref={videoRef} autoPlay playsInline muted class="w-full h-full object-cover object-center"></video>
                     <canvas ref={canvasRef} class="hidden"></canvas>
                     
-                    {/* GPS Loading Overlay */}
                     {loadingGeo && (
                         <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center z-10 animate-fade-in">
                             <i class="fa-solid fa-location-crosshairs fa-spin text-primary text-4xl mb-4"></i>
@@ -478,7 +510,6 @@
                         </div>
                     )}
 
-                    {/* GPS Error & Retry Overlay Popup */}
                     {gpsError && (
                         <div class="absolute inset-0 bg-slate-900/90 backdrop-blur-md flex flex-col items-center justify-center z-20 animate-fade-in p-5 text-center">
                             <div class="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-3xl mb-4 shadow-lg shadow-red-500/20"><i class="fa-solid fa-location-crosshairs"></i></div>
@@ -502,7 +533,6 @@
 
             return (
                 <div class="flex h-screen overflow-hidden bg-bgLight">
-                    {/* Desktop Sidebar */}
                     <aside class="w-64 bg-white border-r border-slate-100 hidden md:flex flex-col flex-shrink-0 z-20">
                         <div class="p-6 flex items-center gap-3">
                             <div class="bg-primary text-white w-8 h-8 rounded-lg flex items-center justify-center shadow"><i class="fa-solid fa-location-dot text-sm"></i></div>
@@ -511,6 +541,7 @@
                         <nav class="flex-1 px-4 space-y-1 mt-2">
                             {[
                                 { id: 'dashboard', icon: 'fa-border-all', label: 'Dashboard' },
+                                { id: 'attendance', icon: 'fa-user-check', label: 'Attendance' },
                                 { id: 'logs', icon: 'fa-list-ul', label: 'Historical Logs' },
                                 { id: 'users', icon: 'fa-users-gear', label: 'User Management' }
                             ].map(item => (
@@ -527,14 +558,16 @@
                     </aside>
 
                     <main class="flex-1 flex flex-col h-full overflow-hidden relative">
-                        {/* Mobile Header (Updated with visible Logout button) */}
                         <div class="md:hidden bg-white border-b border-slate-100 p-4 flex justify-between items-center z-20 shadow-sm">
                             <div class="flex items-center gap-2">
                                 <span class="font-extrabold text-slate-900 tracking-tight">Site Track</span>
                             </div>
                             <div class="flex items-center gap-3">
                                 <select value={currentTab} onChange={(e) => setCurrentTab(e.target.value)} class="border border-slate-200 rounded-lg p-1.5 text-sm bg-slate-50 text-slate-700 outline-none font-semibold shadow-sm">
-                                    <option value="dashboard">Dashboard</option><option value="logs">Logs</option><option value="users">Users</option>
+                                    <option value="dashboard">Dashboard</option>
+                                    <option value="attendance">Attendance</option>
+                                    <option value="logs">Logs</option>
+                                    <option value="users">Users</option>
                                 </select>
                                 <button onClick={handleLogout} class="text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-slate-700 w-9 h-9 rounded-lg flex items-center justify-center transition border border-slate-200 shadow-sm" title="Log Out">
                                     <i class="fa-solid fa-sign-out-alt"></i>
@@ -542,7 +575,6 @@
                             </div>
                         </div>
 
-                        {/* Desktop Header */}
                         <header class="hidden md:flex bg-white h-20 border-b border-slate-100 items-center justify-end px-8 z-10 flex-shrink-0">
                             <div class="flex items-center gap-3 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition" onClick={handleLogout} title="Click to Logout">
                                 <img src={`https://ui-avatars.com/api/?name=Admin&background=4f46e5&color=fff`} class="w-9 h-9 rounded-full shadow-sm" />
@@ -550,9 +582,9 @@
                                 <i class="fa-solid fa-sign-out-alt text-slate-400 ml-2"></i>
                             </div>
                         </header>
-
                         <div class="flex-1 overflow-auto p-4 md:p-8">
                             {currentTab === 'dashboard' && <DashboardView db={db} />}
+                            {currentTab === 'attendance' && <AttendanceView db={db} />}
                             {currentTab === 'logs' && <LogsView db={db} />}
                             {currentTab === 'users' && <UserManagementView db={db} showToast={showToast} />}
                         </div>
@@ -618,6 +650,77 @@
                         </div>
                     </div>
                     {selectedLog && <LogDetailsModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
+                </div>
+            );
+        }
+
+        // --- NEW ATTENDANCE VIEW ---
+        function AttendanceView({ db }) {
+            const [filterDate, setFilterDate] = useState(new Date().toISOString().split('T')[0]);
+
+            const coordinators = db.users.filter(u => u.role === 'coordinator');
+            const allVisits = [...db.activeSites, ...db.logs];
+
+            const attendanceData = coordinators.map(coord => {
+                const coordVisits = allVisits.filter(v => 
+                    String(v.coordinatorId) === String(coord.id) && 
+                    (v.checkInTime || '').startsWith(filterDate)
+                ).sort((a, b) => new Date(a.checkInTime) - new Date(b.checkInTime));
+
+                const isPresent = coordVisits.length > 0;
+                const firstCheckIn = isPresent ? new Date(coordVisits[0].checkInTime).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}) : '-';
+                
+                const lastCheckOut = isPresent && coordVisits[coordVisits.length - 1].checkOutTime 
+                    ? new Date(coordVisits[coordVisits.length - 1].checkOutTime).toLocaleTimeString('en-US', {hour: '2-digit', minute:'2-digit'}) 
+                    : (isPresent && !coordVisits[coordVisits.length - 1].checkOutTime ? 'Still On-site' : '-');
+                
+                const sitesVisited = isPresent ? [...new Set(coordVisits.map(v => v.siteName))].join(', ') : '-';
+
+                return { ...coord, isPresent, firstCheckIn, lastCheckOut, sitesVisited, visitCount: coordVisits.length };
+            });
+
+            return (
+                <div class="max-w-6xl mx-auto animate-fade-in">
+                    <div class="mb-6 flex flex-col md:flex-row justify-between md:items-center gap-4">
+                        <h2 class="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+                            Daily Attendance Record
+                            {db.isSyncing && <i class="fa-solid fa-spinner fa-spin text-primary text-sm ml-2"></i>}
+                        </h2>
+                        <div class="flex items-center gap-3">
+                            <label class="text-sm font-bold text-slate-500">Date:</label>
+                            <input type="date" class="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 focus:border-primary outline-none" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-x-auto">
+                        <table class="w-full text-left whitespace-nowrap">
+                            <thead class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase border-b border-slate-100">
+                                <tr>
+                                    <th class="p-4 pl-6">Coordinator</th>
+                                    <th class="p-4">Status</th>
+                                    <th class="p-4">First Check-In</th>
+                                    <th class="p-4">Last Check-Out</th>
+                                    <th class="p-4">Sites Visited</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {attendanceData.length === 0 && <tr><td colSpan="5" class="p-8 text-center text-slate-400 text-sm">No coordinators found in system.</td></tr>}
+                                {attendanceData.map((data, idx) => (
+                                    <tr key={idx} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
+                                        <td class="p-4 pl-6 font-bold text-sm text-slate-800">{data.name}</td>
+                                        <td class="p-4">
+                                            <span class={`px-2.5 py-1 rounded-md text-xs font-bold border ${data.isPresent ? 'bg-[#e6fcf0] text-emerald-700 border-[#a3f0c9]' : 'bg-red-50 text-red-600 border-red-100'}`}>
+                                                {data.isPresent ? 'Present' : 'No Show'}
+                                            </span>
+                                        </td>
+                                        <td class="p-4 text-sm text-slate-600 font-medium">{data.firstCheckIn}</td>
+                                        <td class="p-4 text-sm text-slate-600 font-medium">{data.lastCheckOut}</td>
+                                        <td class="p-4 text-sm text-slate-600 font-medium max-w-xs truncate" title={data.sitesVisited}>{data.sitesVisited}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             );
         }
