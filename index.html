@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Site Track - Field Coordinator App</title>
+    <!-- Tailwind CSS for Styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <!-- Babel for JSX compilation in the browser -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- MOCK DATABASE (Local Storage) ---
+        // For a true production app, you would replace these localStorage calls with Firebase or Google Sheets API calls.
+        const useDatabase = () => {
+            const [logs, setLogs] = useState(() => JSON.parse(localStorage.getItem('siteLogs')) || []);
+            const [activeSites, setActiveSites] = useState(() => JSON.parse(localStorage.getItem('activeSites')) || []);
+
+            useEffect(() => {
+                localStorage.setItem('siteLogs', JSON.stringify(logs));
+            }, [logs]);
+
+            useEffect(() => {
+                localStorage.setItem('activeSites', JSON.stringify(activeSites));
+            }, [activeSites]);
+
+            return { logs, setLogs, activeSites, setActiveSites };
+        };
+
+        // --- MAIN APP COMPONENT ---
+        function App() {
+            const [userRole, setUserRole] = useState(null); // 'admin', 'coordinator', or null
+            const [userName, setUserName] = useState("John Doe"); 
+            const db = useDatabase();
+
+            if (!userRole) {
+                return <LoginScreen setUserRole={setUserRole} />;
+            }
+
+            return (
+                <div class="max-w-md mx-auto sm:max-w-4xl bg-white min-h-screen shadow-lg">
+                    <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
+                        <h1 class="text-xl font-bold"><i class="fa-solid fa-map-location-dot mr-2"></i>Site Track</h1>
+                        <div class="flex items-center gap-4">
+                            <span class="text-sm">{userRole === 'admin' ? 'Admin Panel' : `Hello, ${userName}`}</span>
+                            <button onClick={() => setUserRole(null)} class="bg-blue-800 px-3 py-1 rounded text-sm hover:bg-blue-900">Logout</button>
+                        </div>
+                    </header>
+                    <main class="p-4">
+                        {userRole === 'coordinator' && <CoordinatorApp db={db} userName={userName} />}
+                        {userRole === 'admin' && <AdminApp db={db} />}
+                    </main>
+                </div>
+            );
+        }
+
+        // --- LOGIN SCREEN ---
+        function LoginScreen({ setUserRole }) {
+            return (
+                <div class="flex items-center justify-center min-h-screen bg-gray-200 p-4">
+                    <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm text-center">
+                        <i class="fa-solid fa-map-location-dot text-5xl text-blue-600 mb-4"></i>
+                        <h1 class="text-2xl font-bold mb-6">Site Track</h1>
+                        <p class="text-gray-600 mb-6">Select your role to continue</p>
+                        <div class="space-y-4">
+                            <button onClick={() => setUserRole('coordinator')} class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
+                                Login as Coordinator
+                            </button>
+                            <button onClick={() => setUserRole('admin')} class="w-full bg-gray-800 text-white py-3 rounded-lg font-semibold hover:bg-gray-900 transition">
+                                Login as Admin
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- COORDINATOR APP ---
+        function CoordinatorApp({ db, userName }) {
+            const [view, setView] = useState('home'); // home, checkin, checkout
+            const [selectedSite, setSelectedSite] = useState(null);
+
+            if (view === 'checkin') return <CheckInFlow db={db} userName={userName} goBack={() => setView('home')} />;
+            if (view === 'checkout') return <CheckOutFlow db={db} userName={userName} siteToCheckout={selectedSite} goBack={() => setView('home')} />;
+
+            return (
+                <div class="space-y-6">
+                    <div class="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                        <h2 class="text-lg font-bold mb-2">Actions</h2>
+                        <button onClick={() => setView('checkin')} class="w-full bg-green-500 text-white py-3 rounded shadow hover:bg-green-600 flex items-center justify-center font-bold text-lg mb-3">
+                            <i class="fa-solid fa-sign-in-alt mr-2"></i> Log In to New Site
+                        </button>
+                    </div>
+
+                    <div>
+                        <h2 class="text-lg font-bold mb-3 border-b pb-2">Currently Active Sites</h2>
+                        {db.activeSites.length === 0 ? (
+                            <p class="text-gray-500 italic text-center p-4">You are not checked into any sites.</p>
+                        ) : (
+                            <div class="space-y-3">
+                                {db.activeSites.map(site => (
+                                    <div key={site.id} class="bg-white border rounded p-4 shadow-sm flex justify-between items-center">
+                                        <div>
+                                            <h3 class="font-bold text-lg">{site.siteName}</h3>
+                                            <p class="text-sm text-gray-600"><i class="fa-regular fa-clock mr-1"></i> {new Date(site.checkInTime).toLocaleTimeString()}</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => { setSelectedSite(site); setView('checkout'); }}
+                                            class="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 font-semibold shadow"
+                                        >
+                                            Log Out
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // --- CHECK-IN FLOW ---
+        function CheckInFlow({ db, userName, goBack }) {
+            const [step, setStep] = useState(1); // 1: details, 2: camera/location
+            const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
+            const [photo, setPhoto] = useState(null);
+            const [location, setLocation] = useState(null);
+
+            const handleDetailsSubmit = (e) => {
+                e.preventDefault();
+                setStep(2);
+            };
+
+            const handleFinalSubmit = () => {
+                const newSite = {
+                    id: Date.now().toString(),
+                    coordinator: userName,
+                    siteName: formData.siteName,
+                    locationDetails: formData.locationDetails,
+                    workers: formData.workers,
+                    checkInTime: new Date().toISOString(),
+                    checkInPhoto: photo,
+                    checkInLocation: location
+                };
+                db.setActiveSites([...db.activeSites, newSite]);
+                alert("Successfully checked in!");
+                goBack();
+            };
+
+            if (step === 1) {
+                return (
+                    <div>
+                        <button onClick={goBack} class="mb-4 text-blue-600"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
+                        <h2 class="text-xl font-bold mb-4">Site Details (Check-In)</h2>
+                        <form onSubmit={handleDetailsSubmit} class="space-y-4">
+                            <div>
+                                <label class="block font-semibold mb-1">Site Name</label>
+                                <input required type="text" class="w-full border p-2 rounded" placeholder="e.g., Downtown Plaza Phase 2" value={formData.siteName} onChange={e => setFormData({...formData, siteName: e.target.value})} />
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Site Location / Zone</label>
+                                <input required type="text" class="w-full border p-2 rounded" placeholder="e.g., Sector 4" value={formData.locationDetails} onChange={e => setFormData({...formData, locationDetails: e.target.value})} />
+                            </div>
+                            <div>
+                                <label class="block font-semibold mb-1">Total Workers Present</label>
+                                <input required type="number" class="w-full border p-2 rounded" placeholder="0" value={formData.workers} onChange={e => setFormData({...formData, workers: e.target.value})} />
+                            </div>
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded mt-4">Next Step</button>
+                        </form>
+                    </div>
+                );
+            }
+
+            return (
+                <div>
+                    <button onClick={() => setStep(1)} class="mb-4 text-blue-600"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
+                    <h2 class="text-xl font-bold mb-4">Verify Identity & Location</h2>
+                    <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
+                    {photo && location && (
+                        <button onClick={handleFinalSubmit} class="w-full bg-green-500 text-white py-3 rounded mt-4 font-bold text-lg hover:bg-green-600 shadow">
+                            Complete Check-In
+                        </button>
+                    )}
+                </div>
+            );
+        }
+
+        // --- CHECK-OUT FLOW ---
+        function CheckOutFlow({ db, userName, siteToCheckout, goBack }) {
+            const [notes, setNotes] = useState('');
+            const [photo, setPhoto] = useState(null);
+            const [location, setLocation] = useState(null);
+
+            const handleFinalSubmit = () => {
+                const logEntry = {
+                    ...siteToCheckout,
+                    checkOutTime: new Date().toISOString(),
+                    checkOutPhoto: photo,
+                    checkOutLocation: location,
+                    notes: notes
+                };
+                
+                // Add to logs
+                db.setLogs([...db.logs, logEntry]);
+                
+                // Remove from active sites
+                db.setActiveSites(db.activeSites.filter(s => s.id !== siteToCheckout.id));
+                
+                alert("Successfully logged out of site!");
+                goBack();
+            };
+
+            return (
+                <div>
+                    <button onClick={goBack} class="mb-4 text-blue-600"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
+                    <h2 class="text-xl font-bold mb-4">Check-Out: {siteToCheckout.siteName}</h2>
+                    
+                    <div class="mb-4">
+                        <label class="block font-semibold mb-1">Closing Remarks / Notes (Optional)</label>
+                        <textarea class="w-full border p-2 rounded h-24" placeholder="Any issues or progress notes?" value={notes} onChange={e => setNotes(e.target.value)}></textarea>
+                    </div>
+
+                    <h3 class="font-bold mb-2">Checkout Verification</h3>
+                    <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
+                    
+                    {photo && location && (
+                        <button onClick={handleFinalSubmit} class="w-full bg-red-500 text-white py-3 rounded mt-4 font-bold text-lg hover:bg-red-600 shadow">
+                            Confirm Check-Out
+                        </button>
+                    )}
+                </div>
+            );
+        }
+
+        // --- CAMERA & LOCATION HELPER COMPONENT ---
+        function CameraAndLocation({ onCapture }) {
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const [stream, setStream] = useState(null);
+            const [capturedImg, setCapturedImg] = useState(null);
+            const [geo, setGeo] = useState(null);
+            const [loadingGeo, setLoadingGeo] = useState(false);
+
+            useEffect(() => {
+                startCamera();
+                return () => stopCamera();
+            }, []);
+
+            const startCamera = async () => {
+                try {
+                    const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+                    setStream(mediaStream);
+                    if (videoRef.current) videoRef.current.srcObject = mediaStream;
+                } catch (err) {
+                    alert("Camera access denied or unavailable.");
+                }
+            };
+
+            const stopCamera = () => {
+                if (stream) stream.getTracks().forEach(track => track.stop());
+            };
+
+            const captureData = () => {
+                // 1. Capture Image
+                const canvas = canvasRef.current;
+                const video = videoRef.current;
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                canvas.getContext('2d').drawImage(video, 0, 0);
+                const imgData = canvas.toDataURL('image/jpeg', 0.5); // Compress to 50% quality
+                setCapturedImg(imgData);
+                stopCamera();
+
+                // 2. Capture Location
+                setLoadingGeo(true);
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
+                            setGeo(loc);
+                            setLoadingGeo(false);
+                            onCapture(imgData, loc);
+                        },
+                        (error) => {
+                            alert("Location access denied. Using fallback location for demo.");
+                            const fallback = { lat: 0, lng: 0 };
+                            setGeo(fallback);
+                            setLoadingGeo(false);
+                            onCapture(imgData, fallback);
+                        },
+                        { enableHighAccuracy: true }
+                    );
+                } else {
+                    setLoadingGeo(false);
+                }
+            };
+
+            const retake = () => {
+                setCapturedImg(null);
+                setGeo(null);
+                onCapture(null, null);
+                startCamera();
+            };
+
+            if (capturedImg) {
+                return (
+                    <div class="bg-gray-50 p-4 border rounded">
+                        <img src={capturedImg} class="w-full rounded mb-2 shadow" alt="Selfie" />
+                        {loadingGeo ? <p class="text-sm text-blue-600"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Fetching GPS...</p> : 
+                            <p class="text-sm text-green-700 bg-green-100 p-2 rounded"><i class="fa-solid fa-location-dot mr-1"></i> Lat: {geo?.lat.toFixed(4)}, Lng: {geo?.lng.toFixed(4)}</p>
+                        }
+                        <button onClick={retake} class="mt-2 text-sm text-blue-600 underline">Retake Photo</button>
+                    </div>
+                );
+            }
+
+            return (
+                <div class="bg-black rounded overflow-hidden relative">
+                    <video ref={videoRef} autoPlay playsInline class="w-full h-64 object-cover"></video>
+                    <canvas ref={canvasRef} class="hidden"></canvas>
+                    <button onClick={captureData} class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-white text-black p-4 rounded-full shadow-lg hover:bg-gray-200">
+                        <i class="fa-solid fa-camera text-xl"></i>
+                    </button>
+                </div>
+            );
+        }
+
+        // --- ADMIN DASHBOARD ---
+        function AdminApp({ db }) {
+            const [filter, setFilter] = useState('');
+            const [selectedLog, setSelectedLog] = useState(null);
+
+            const filteredLogs = db.logs.filter(log => 
+                log.siteName.toLowerCase().includes(filter.toLowerCase()) || 
+                log.coordinator.toLowerCase().includes(filter.toLowerCase())
+            );
+
+            return (
+                <div>
+                    <h2 class="text-2xl font-bold mb-4">Admin Dashboard</h2>
+                    
+                    <div class="mb-4">
+                        <input 
+                            type="text" 
+                            placeholder="Filter by Site or Coordinator..." 
+                            class="w-full sm:w-1/2 border p-2 rounded shadow-sm"
+                            value={filter}
+                            onChange={(e) => setFilter(e.target.value)}
+                        />
+                    </div>
+
+                    <div class="overflow-x-auto bg-white rounded shadow">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-gray-800 text-white">
+                                    <th class="p-3">Date</th>
+                                    <th class="p-3">Coordinator</th>
+                                    <th class="p-3">Site</th>
+                                    <th class="p-3">Workers</th>
+                                    <th class="p-3">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredLogs.length === 0 && (
+                                    <tr><td colSpan="5" class="p-4 text-center text-gray-500">No completed visits recorded yet.</td></tr>
+                                )}
+                                {filteredLogs.map(log => (
+                                    <tr key={log.id} class="border-b hover:bg-gray-50">
+                                        <td class="p-3">{new Date(log.checkInTime).toLocaleDateString()}</td>
+                                        <td class="p-3 font-semibold">{log.coordinator}</td>
+                                        <td class="p-3">{log.siteName}</td>
+                                        <td class="p-3">{log.workers}</td>
+                                        <td class="p-3">
+                                            <button onClick={() => setSelectedLog(log)} class="text-blue-600 hover:underline">View Details</button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {selectedLog && (
+                        <div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
+                            <div class="bg-white p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                                <div class="flex justify-between items-start mb-4">
+                                    <h3 class="text-xl font-bold">Visit Details</h3>
+                                    <button onClick={() => setSelectedLog(null)} class="text-gray-500 hover:text-black"><i class="fa-solid fa-times text-xl"></i></button>
+                                </div>
+                                
+                                <div class="grid grid-cols-2 gap-4 mb-6">
+                                    <div><p class="text-sm text-gray-500">Coordinator</p><p class="font-bold">{selectedLog.coordinator}</p></div>
+                                    <div><p class="text-sm text-gray-500">Site Name</p><p class="font-bold">{selectedLog.siteName}</p></div>
+                                    <div><p class="text-sm text-gray-500">Location Details</p><p>{selectedLog.locationDetails}</p></div>
+                                    <div><p class="text-sm text-gray-500">Total Workers</p><p>{selectedLog.workers}</p></div>
+                                </div>
+
+                                <div class="grid sm:grid-cols-2 gap-6">
+                                    <div class="bg-gray-50 p-3 rounded border">
+                                        <h4 class="font-bold text-green-600 mb-2">Check-In</h4>
+                                        <p class="text-xs mb-2">{new Date(selectedLog.checkInTime).toLocaleString()}</p>
+                                        <img src={selectedLog.checkInPhoto} class="w-full h-40 object-cover rounded mb-2" />
+                                        <p class="text-xs text-gray-600">Lat: {selectedLog.checkInLocation?.lat.toFixed(4)}, Lng: {selectedLog.checkInLocation?.lng.toFixed(4)}</p>
+                                    </div>
+                                    <div class="bg-gray-50 p-3 rounded border">
+                                        <h4 class="font-bold text-red-600 mb-2">Check-Out</h4>
+                                        <p class="text-xs mb-2">{new Date(selectedLog.checkOutTime).toLocaleString()}</p>
+                                        <img src={selectedLog.checkOutPhoto} class="w-full h-40 object-cover rounded mb-2" />
+                                        <p class="text-xs text-gray-600">Lat: {selectedLog.checkOutLocation?.lat.toFixed(4)}, Lng: {selectedLog.checkOutLocation?.lng.toFixed(4)}</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="mt-4 bg-gray-100 p-3 rounded">
+                                    <p class="text-sm font-bold text-gray-700">Remarks / Notes:</p>
+                                    <p class="text-gray-800">{selectedLog.notes || 'No notes provided.'}</p>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
