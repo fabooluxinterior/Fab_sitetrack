@@ -4,14 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Site Track - Field Coordinator App</title>
-    <!-- Tailwind CSS for Styling -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & ReactDOM -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <!-- Babel for JSX compilation in the browser -->
+    <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- FontAwesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- HTML2PDF for PDF Generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 </head>
 <body class="bg-gray-100 text-gray-800 font-sans">
     <div id="root"></div>
@@ -19,78 +22,104 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- MOCK DATABASE (Local Storage) ---
-        // For a true production app, you would replace these localStorage calls with Firebase or Google Sheets API calls.
+        // --- DATABASE HOOK (Local Storage) ---
         const useDatabase = () => {
+            const defaultUsers = [
+                { id: '1', email: 'designer8fab@gmail.com', password: 'Fab999', role: 'admin', name: 'Admin Fab' }
+            ];
+
             const [logs, setLogs] = useState(() => JSON.parse(localStorage.getItem('siteLogs')) || []);
             const [activeSites, setActiveSites] = useState(() => JSON.parse(localStorage.getItem('activeSites')) || []);
+            const [users, setUsers] = useState(() => JSON.parse(localStorage.getItem('siteUsers')) || defaultUsers);
 
-            useEffect(() => {
-                localStorage.setItem('siteLogs', JSON.stringify(logs));
-            }, [logs]);
+            useEffect(() => { localStorage.setItem('siteLogs', JSON.stringify(logs)); }, [logs]);
+            useEffect(() => { localStorage.setItem('activeSites', JSON.stringify(activeSites)); }, [activeSites]);
+            useEffect(() => { localStorage.setItem('siteUsers', JSON.stringify(users)); }, [users]);
 
-            useEffect(() => {
-                localStorage.setItem('activeSites', JSON.stringify(activeSites));
-            }, [activeSites]);
-
-            return { logs, setLogs, activeSites, setActiveSites };
+            return { logs, setLogs, activeSites, setActiveSites, users, setUsers };
         };
 
         // --- MAIN APP COMPONENT ---
         function App() {
-            const [userRole, setUserRole] = useState(null); // 'admin', 'coordinator', or null
-            const [userName, setUserName] = useState("John Doe"); 
+            const [currentUser, setCurrentUser] = useState(null); 
             const db = useDatabase();
 
-            if (!userRole) {
-                return <LoginScreen setUserRole={setUserRole} />;
+            if (!currentUser) {
+                return <LoginScreen db={db} onLogin={(user) => setCurrentUser(user)} />;
             }
 
             return (
-                <div class="max-w-md mx-auto sm:max-w-4xl bg-white min-h-screen shadow-lg">
-                    <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
+                <div class="max-w-md mx-auto sm:max-w-5xl bg-white min-h-screen shadow-lg">
+                    <header class="bg-blue-600 text-white p-4 flex justify-between items-center shadow">
                         <h1 class="text-xl font-bold"><i class="fa-solid fa-map-location-dot mr-2"></i>Site Track</h1>
                         <div class="flex items-center gap-4">
-                            <span class="text-sm">{userRole === 'admin' ? 'Admin Panel' : `Hello, ${userName}`}</span>
-                            <button onClick={() => setUserRole(null)} class="bg-blue-800 px-3 py-1 rounded text-sm hover:bg-blue-900">Logout</button>
+                            <span class="text-sm font-semibold hidden sm:inline-block">
+                                {currentUser.role === 'admin' ? `Admin: ${currentUser.name}` : `Hello, ${currentUser.name}`}
+                            </span>
+                            <button onClick={() => setCurrentUser(null)} class="bg-blue-800 px-3 py-1 rounded text-sm hover:bg-blue-900 transition">Logout</button>
                         </div>
                     </header>
-                    <main class="p-4">
-                        {userRole === 'coordinator' && <CoordinatorApp db={db} userName={userName} />}
-                        {userRole === 'admin' && <AdminApp db={db} />}
+                    <main class="p-4 sm:p-6">
+                        {currentUser.role === 'coordinator' && <CoordinatorApp db={db} currentUser={currentUser} />}
+                        {currentUser.role === 'admin' && <AdminApp db={db} />}
                     </main>
                 </div>
             );
         }
 
         // --- LOGIN SCREEN ---
-        function LoginScreen({ setUserRole }) {
+        function LoginScreen({ db, onLogin }) {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
+
+            const handleLogin = (e) => {
+                e.preventDefault();
+                const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
+                if (user) {
+                    onLogin(user);
+                } else {
+                    setError('Invalid email or password.');
+                }
+            };
+
             return (
                 <div class="flex items-center justify-center min-h-screen bg-gray-200 p-4">
                     <div class="bg-white p-8 rounded-lg shadow-xl w-full max-w-sm text-center">
                         <i class="fa-solid fa-map-location-dot text-5xl text-blue-600 mb-4"></i>
-                        <h1 class="text-2xl font-bold mb-6">Site Track</h1>
-                        <p class="text-gray-600 mb-6">Select your role to continue</p>
-                        <div class="space-y-4">
-                            <button onClick={() => setUserRole('coordinator')} class="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 transition">
-                                Login as Coordinator
+                        <h1 class="text-2xl font-bold mb-2">Site Track</h1>
+                        <p class="text-gray-600 mb-6 text-sm">Please log in to continue</p>
+                        
+                        {error && <div class="bg-red-100 text-red-700 p-2 rounded mb-4 text-sm">{error}</div>}
+
+                        <form onSubmit={handleLogin} class="space-y-4 text-left">
+                            <div>
+                                <label class="block text-sm font-bold mb-1">Email Address</label>
+                                <input required type="email" class="w-full border p-2 rounded focus:outline-blue-500" placeholder="admin@example.com" value={email} onChange={e => setEmail(e.target.value)} />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-bold mb-1">Password</label>
+                                <input required type="password" class="w-full border p-2 rounded focus:outline-blue-500" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} />
+                            </div>
+                            <button type="submit" class="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition shadow">
+                                Log In
                             </button>
-                            <button onClick={() => setUserRole('admin')} class="w-full bg-gray-800 text-white py-3 rounded-lg font-semibold hover:bg-gray-900 transition">
-                                Login as Admin
-                            </button>
-                        </div>
+                        </form>
                     </div>
                 </div>
             );
         }
 
         // --- COORDINATOR APP ---
-        function CoordinatorApp({ db, userName }) {
-            const [view, setView] = useState('home'); // home, checkin, checkout
+        function CoordinatorApp({ db, currentUser }) {
+            const [view, setView] = useState('home'); 
             const [selectedSite, setSelectedSite] = useState(null);
 
-            if (view === 'checkin') return <CheckInFlow db={db} userName={userName} goBack={() => setView('home')} />;
-            if (view === 'checkout') return <CheckOutFlow db={db} userName={userName} siteToCheckout={selectedSite} goBack={() => setView('home')} />;
+            // Filter active sites for THIS specific coordinator
+            const myActiveSites = db.activeSites.filter(site => site.coordinatorId === currentUser.id);
+
+            if (view === 'checkin') return <CheckInFlow db={db} currentUser={currentUser} goBack={() => setView('home')} />;
+            if (view === 'checkout') return <CheckOutFlow db={db} siteToCheckout={selectedSite} goBack={() => setView('home')} />;
 
             return (
                 <div class="space-y-6">
@@ -102,12 +131,12 @@
                     </div>
 
                     <div>
-                        <h2 class="text-lg font-bold mb-3 border-b pb-2">Currently Active Sites</h2>
-                        {db.activeSites.length === 0 ? (
+                        <h2 class="text-lg font-bold mb-3 border-b pb-2">My Active Sites</h2>
+                        {myActiveSites.length === 0 ? (
                             <p class="text-gray-500 italic text-center p-4">You are not checked into any sites.</p>
                         ) : (
                             <div class="space-y-3">
-                                {db.activeSites.map(site => (
+                                {myActiveSites.map(site => (
                                     <div key={site.id} class="bg-white border rounded p-4 shadow-sm flex justify-between items-center">
                                         <div>
                                             <h3 class="font-bold text-lg">{site.siteName}</h3>
@@ -129,21 +158,17 @@
         }
 
         // --- CHECK-IN FLOW ---
-        function CheckInFlow({ db, userName, goBack }) {
-            const [step, setStep] = useState(1); // 1: details, 2: camera/location
+        function CheckInFlow({ db, currentUser, goBack }) {
+            const [step, setStep] = useState(1);
             const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
 
-            const handleDetailsSubmit = (e) => {
-                e.preventDefault();
-                setStep(2);
-            };
-
             const handleFinalSubmit = () => {
                 const newSite = {
                     id: Date.now().toString(),
-                    coordinator: userName,
+                    coordinatorId: currentUser.id,
+                    coordinatorName: currentUser.name,
                     siteName: formData.siteName,
                     locationDetails: formData.locationDetails,
                     workers: formData.workers,
@@ -161,7 +186,7 @@
                     <div>
                         <button onClick={goBack} class="mb-4 text-blue-600"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
                         <h2 class="text-xl font-bold mb-4">Site Details (Check-In)</h2>
-                        <form onSubmit={handleDetailsSubmit} class="space-y-4">
+                        <form onSubmit={(e) => { e.preventDefault(); setStep(2); }} class="space-y-4">
                             <div>
                                 <label class="block font-semibold mb-1">Site Name</label>
                                 <input required type="text" class="w-full border p-2 rounded" placeholder="e.g., Downtown Plaza Phase 2" value={formData.siteName} onChange={e => setFormData({...formData, siteName: e.target.value})} />
@@ -195,7 +220,7 @@
         }
 
         // --- CHECK-OUT FLOW ---
-        function CheckOutFlow({ db, userName, siteToCheckout, goBack }) {
+        function CheckOutFlow({ db, siteToCheckout, goBack }) {
             const [notes, setNotes] = useState('');
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
@@ -208,13 +233,8 @@
                     checkOutLocation: location,
                     notes: notes
                 };
-                
-                // Add to logs
                 db.setLogs([...db.logs, logEntry]);
-                
-                // Remove from active sites
                 db.setActiveSites(db.activeSites.filter(s => s.id !== siteToCheckout.id));
-                
                 alert("Successfully logged out of site!");
                 goBack();
             };
@@ -223,15 +243,12 @@
                 <div>
                     <button onClick={goBack} class="mb-4 text-blue-600"><i class="fa-solid fa-arrow-left mr-1"></i> Back</button>
                     <h2 class="text-xl font-bold mb-4">Check-Out: {siteToCheckout.siteName}</h2>
-                    
                     <div class="mb-4">
                         <label class="block font-semibold mb-1">Closing Remarks / Notes (Optional)</label>
                         <textarea class="w-full border p-2 rounded h-24" placeholder="Any issues or progress notes?" value={notes} onChange={e => setNotes(e.target.value)}></textarea>
                     </div>
-
                     <h3 class="font-bold mb-2">Checkout Verification</h3>
                     <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
-                    
                     {photo && location && (
                         <button onClick={handleFinalSubmit} class="w-full bg-red-500 text-white py-3 rounded mt-4 font-bold text-lg hover:bg-red-600 shadow">
                             Confirm Check-Out
@@ -250,66 +267,46 @@
             const [geo, setGeo] = useState(null);
             const [loadingGeo, setLoadingGeo] = useState(false);
 
-            useEffect(() => {
-                startCamera();
-                return () => stopCamera();
-            }, []);
+            useEffect(() => { startCamera(); return () => stopCamera(); }, []);
 
             const startCamera = async () => {
                 try {
                     const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                     setStream(mediaStream);
                     if (videoRef.current) videoRef.current.srcObject = mediaStream;
-                } catch (err) {
-                    alert("Camera access denied or unavailable.");
-                }
+                } catch (err) { alert("Camera access denied or unavailable."); }
             };
 
-            const stopCamera = () => {
-                if (stream) stream.getTracks().forEach(track => track.stop());
-            };
+            const stopCamera = () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
 
             const captureData = () => {
-                // 1. Capture Image
                 const canvas = canvasRef.current;
                 const video = videoRef.current;
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 canvas.getContext('2d').drawImage(video, 0, 0);
-                const imgData = canvas.toDataURL('image/jpeg', 0.5); // Compress to 50% quality
+                const imgData = canvas.toDataURL('image/jpeg', 0.5); 
                 setCapturedImg(imgData);
                 stopCamera();
 
-                // 2. Capture Location
                 setLoadingGeo(true);
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
                             const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
-                            setGeo(loc);
-                            setLoadingGeo(false);
-                            onCapture(imgData, loc);
+                            setGeo(loc); setLoadingGeo(false); onCapture(imgData, loc);
                         },
                         (error) => {
                             alert("Location access denied. Using fallback location for demo.");
                             const fallback = { lat: 0, lng: 0 };
-                            setGeo(fallback);
-                            setLoadingGeo(false);
-                            onCapture(imgData, fallback);
+                            setGeo(fallback); setLoadingGeo(false); onCapture(imgData, fallback);
                         },
                         { enableHighAccuracy: true }
                     );
-                } else {
-                    setLoadingGeo(false);
-                }
+                } else { setLoadingGeo(false); }
             };
 
-            const retake = () => {
-                setCapturedImg(null);
-                setGeo(null);
-                onCapture(null, null);
-                startCamera();
-            };
+            const retake = () => { setCapturedImg(null); setGeo(null); onCapture(null, null); startCamera(); };
 
             if (capturedImg) {
                 return (
@@ -336,26 +333,49 @@
 
         // --- ADMIN DASHBOARD ---
         function AdminApp({ db }) {
-            const [filter, setFilter] = useState('');
+            const [tab, setTab] = useState('logs'); // 'logs' or 'users'
+            
+            return (
+                <div>
+                    <div class="flex border-b mb-6">
+                        <button onClick={() => setTab('logs')} class={`px-4 py-2 font-bold ${tab === 'logs' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>Site Visits Data</button>
+                        <button onClick={() => setTab('users')} class={`px-4 py-2 font-bold ${tab === 'users' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500'}`}>User Management</button>
+                    </div>
+
+                    {tab === 'logs' ? <LogsView db={db} /> : <UserManagementView db={db} />}
+                </div>
+            );
+        }
+
+        function LogsView({ db }) {
+            const [filterName, setFilterName] = useState('');
+            const [filterDate, setFilterDate] = useState('');
             const [selectedLog, setSelectedLog] = useState(null);
 
-            const filteredLogs = db.logs.filter(log => 
-                log.siteName.toLowerCase().includes(filter.toLowerCase()) || 
-                log.coordinator.toLowerCase().includes(filter.toLowerCase())
-            );
+            const filteredLogs = db.logs.filter(log => {
+                const matchName = log.coordinatorName.toLowerCase().includes(filterName.toLowerCase());
+                const logDate = new Date(log.checkInTime).toISOString().split('T')[0];
+                const matchDate = filterDate ? logDate === filterDate : true;
+                return matchName && matchDate;
+            });
+
+            const downloadPDF = () => {
+                const element = document.getElementById('pdf-report-content');
+                const opt = {
+                    margin: 0.5,
+                    filename: `${selectedLog.coordinatorName}_SiteVisit_${new Date(selectedLog.checkInTime).toISOString().split('T')[0]}.pdf`,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2 },
+                    jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+                };
+                html2pdf().set(opt).from(element).save();
+            };
 
             return (
                 <div>
-                    <h2 class="text-2xl font-bold mb-4">Admin Dashboard</h2>
-                    
-                    <div class="mb-4">
-                        <input 
-                            type="text" 
-                            placeholder="Filter by Site or Coordinator..." 
-                            class="w-full sm:w-1/2 border p-2 rounded shadow-sm"
-                            value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
-                        />
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                        <input type="text" placeholder="Filter by Coordinator Name..." class="border p-2 rounded shadow-sm" value={filterName} onChange={(e) => setFilterName(e.target.value)} />
+                        <input type="date" class="border p-2 rounded shadow-sm" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} />
                     </div>
 
                     <div class="overflow-x-auto bg-white rounded shadow">
@@ -371,12 +391,12 @@
                             </thead>
                             <tbody>
                                 {filteredLogs.length === 0 && (
-                                    <tr><td colSpan="5" class="p-4 text-center text-gray-500">No completed visits recorded yet.</td></tr>
+                                    <tr><td colSpan="5" class="p-4 text-center text-gray-500">No records found matching filters.</td></tr>
                                 )}
                                 {filteredLogs.map(log => (
                                     <tr key={log.id} class="border-b hover:bg-gray-50">
                                         <td class="p-3">{new Date(log.checkInTime).toLocaleDateString()}</td>
-                                        <td class="p-3 font-semibold">{log.coordinator}</td>
+                                        <td class="p-3 font-semibold">{log.coordinatorName}</td>
                                         <td class="p-3">{log.siteName}</td>
                                         <td class="p-3">{log.workers}</td>
                                         <td class="p-3">
@@ -390,41 +410,144 @@
 
                     {selectedLog && (
                         <div class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4 z-50">
-                            <div class="bg-white p-6 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                                <div class="flex justify-between items-start mb-4">
+                            <div class="bg-white rounded-lg max-w-3xl w-full max-h-[95vh] flex flex-col">
+                                
+                                {/* Modal Header */}
+                                <div class="flex justify-between items-center p-4 border-b">
                                     <h3 class="text-xl font-bold">Visit Details</h3>
-                                    <button onClick={() => setSelectedLog(null)} class="text-gray-500 hover:text-black"><i class="fa-solid fa-times text-xl"></i></button>
+                                    <div class="space-x-2">
+                                        <button onClick={downloadPDF} class="bg-green-600 text-white px-3 py-1 rounded hover:bg-green-700 text-sm font-semibold">
+                                            <i class="fa-solid fa-file-pdf mr-1"></i> Download PDF
+                                        </button>
+                                        <button onClick={() => setSelectedLog(null)} class="text-gray-500 hover:text-black bg-gray-200 px-3 py-1 rounded"><i class="fa-solid fa-times"></i> Close</button>
+                                    </div>
                                 </div>
                                 
-                                <div class="grid grid-cols-2 gap-4 mb-6">
-                                    <div><p class="text-sm text-gray-500">Coordinator</p><p class="font-bold">{selectedLog.coordinator}</p></div>
-                                    <div><p class="text-sm text-gray-500">Site Name</p><p class="font-bold">{selectedLog.siteName}</p></div>
-                                    <div><p class="text-sm text-gray-500">Location Details</p><p>{selectedLog.locationDetails}</p></div>
-                                    <div><p class="text-sm text-gray-500">Total Workers</p><p>{selectedLog.workers}</p></div>
-                                </div>
+                                {/* Modal Body (Target for PDF) */}
+                                <div id="pdf-report-content" class="p-6 overflow-y-auto bg-white">
+                                    <h2 class="text-2xl font-bold mb-4 border-b pb-2 text-blue-800">Site Track - Daily Report</h2>
+                                    
+                                    <div class="grid grid-cols-2 gap-4 mb-6 bg-gray-50 p-4 rounded border">
+                                        <div><p class="text-sm text-gray-500">Coordinator</p><p class="font-bold text-lg">{selectedLog.coordinatorName}</p></div>
+                                        <div><p class="text-sm text-gray-500">Site Name</p><p class="font-bold text-lg">{selectedLog.siteName}</p></div>
+                                        <div><p class="text-sm text-gray-500">Location Details</p><p>{selectedLog.locationDetails}</p></div>
+                                        <div><p class="text-sm text-gray-500">Total Workers</p><p>{selectedLog.workers}</p></div>
+                                    </div>
 
-                                <div class="grid sm:grid-cols-2 gap-6">
-                                    <div class="bg-gray-50 p-3 rounded border">
-                                        <h4 class="font-bold text-green-600 mb-2">Check-In</h4>
-                                        <p class="text-xs mb-2">{new Date(selectedLog.checkInTime).toLocaleString()}</p>
-                                        <img src={selectedLog.checkInPhoto} class="w-full h-40 object-cover rounded mb-2" />
-                                        <p class="text-xs text-gray-600">Lat: {selectedLog.checkInLocation?.lat.toFixed(4)}, Lng: {selectedLog.checkInLocation?.lng.toFixed(4)}</p>
+                                    <div class="grid sm:grid-cols-2 gap-6">
+                                        <div class="p-4 rounded border border-green-200">
+                                            <h4 class="font-bold text-green-700 mb-2 border-b border-green-200 pb-1">Check-In Event</h4>
+                                            <p class="text-sm font-semibold mb-2"><i class="fa-regular fa-clock mr-1"></i> {new Date(selectedLog.checkInTime).toLocaleString()}</p>
+                                            <img src={selectedLog.checkInPhoto} class="w-full h-48 object-cover rounded mb-3 border" />
+                                            <p class="text-xs text-gray-600 mb-1">Lat: {selectedLog.checkInLocation?.lat.toFixed(5)}<br/>Lng: {selectedLog.checkInLocation?.lng.toFixed(5)}</p>
+                                            <a href={`https://www.google.com/maps?q=${selectedLog.checkInLocation?.lat},${selectedLog.checkInLocation?.lng}`} target="_blank" class="text-sm text-blue-600 hover:underline font-semibold mt-2 inline-block">
+                                                <i class="fa-solid fa-map-marker-alt mr-1"></i> Google Maps Link
+                                            </a>
+                                        </div>
+                                        
+                                        <div class="p-4 rounded border border-red-200">
+                                            <h4 class="font-bold text-red-700 mb-2 border-b border-red-200 pb-1">Check-Out Event</h4>
+                                            <p class="text-sm font-semibold mb-2"><i class="fa-regular fa-clock mr-1"></i> {new Date(selectedLog.checkOutTime).toLocaleString()}</p>
+                                            <img src={selectedLog.checkOutPhoto} class="w-full h-48 object-cover rounded mb-3 border" />
+                                            <p class="text-xs text-gray-600 mb-1">Lat: {selectedLog.checkOutLocation?.lat.toFixed(5)}<br/>Lng: {selectedLog.checkOutLocation?.lng.toFixed(5)}</p>
+                                            <a href={`https://www.google.com/maps?q=${selectedLog.checkOutLocation?.lat},${selectedLog.checkOutLocation?.lng}`} target="_blank" class="text-sm text-blue-600 hover:underline font-semibold mt-2 inline-block">
+                                                <i class="fa-solid fa-map-marker-alt mr-1"></i> Google Maps Link
+                                            </a>
+                                        </div>
                                     </div>
-                                    <div class="bg-gray-50 p-3 rounded border">
-                                        <h4 class="font-bold text-red-600 mb-2">Check-Out</h4>
-                                        <p class="text-xs mb-2">{new Date(selectedLog.checkOutTime).toLocaleString()}</p>
-                                        <img src={selectedLog.checkOutPhoto} class="w-full h-40 object-cover rounded mb-2" />
-                                        <p class="text-xs text-gray-600">Lat: {selectedLog.checkOutLocation?.lat.toFixed(4)}, Lng: {selectedLog.checkOutLocation?.lng.toFixed(4)}</p>
+                                    
+                                    <div class="mt-6 bg-yellow-50 border border-yellow-200 p-4 rounded">
+                                        <p class="text-sm font-bold text-yellow-800 mb-1">Closing Remarks / Notes:</p>
+                                        <p class="text-gray-800 whitespace-pre-wrap">{selectedLog.notes || 'No notes provided by coordinator.'}</p>
                                     </div>
-                                </div>
-                                
-                                <div class="mt-4 bg-gray-100 p-3 rounded">
-                                    <p class="text-sm font-bold text-gray-700">Remarks / Notes:</p>
-                                    <p class="text-gray-800">{selectedLog.notes || 'No notes provided.'}</p>
                                 </div>
                             </div>
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        function UserManagementView({ db }) {
+            const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'coordinator' });
+
+            const handleAddUser = (e) => {
+                e.preventDefault();
+                if(db.users.find(u => u.email.toLowerCase() === newUser.email.toLowerCase())) {
+                    alert("A user with this email already exists!");
+                    return;
+                }
+                const userObj = { ...newUser, id: Date.now().toString() };
+                db.setUsers([...db.users, userObj]);
+                setNewUser({ name: '', email: '', password: '', role: 'coordinator' });
+                alert("User added successfully!");
+            };
+
+            const removeUser = (id) => {
+                if(id === '1') { alert("Cannot delete the primary admin account."); return; }
+                if(confirm("Are you sure you want to remove this user?")) {
+                    db.setUsers(db.users.filter(u => u.id !== id));
+                }
+            };
+
+            return (
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="md:col-span-1 bg-white p-4 rounded shadow border">
+                        <h3 class="font-bold text-lg mb-4">Add New User</h3>
+                        <form onSubmit={handleAddUser} class="space-y-3">
+                            <div>
+                                <label class="block text-sm font-semibold">Full Name</label>
+                                <input required type="text" class="w-full border p-2 rounded text-sm" value={newUser.name} onChange={e=>setNewUser({...newUser, name: e.target.value})} />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold">Email Address</label>
+                                <input required type="email" class="w-full border p-2 rounded text-sm" value={newUser.email} onChange={e=>setNewUser({...newUser, email: e.target.value})} />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold">Password</label>
+                                <input required type="text" class="w-full border p-2 rounded text-sm" value={newUser.password} onChange={e=>setNewUser({...newUser, password: e.target.value})} />
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold">Role</label>
+                                <select class="w-full border p-2 rounded text-sm" value={newUser.role} onChange={e=>setNewUser({...newUser, role: e.target.value})}>
+                                    <option value="coordinator">Field Coordinator</option>
+                                    <option value="admin">System Admin</option>
+                                </select>
+                            </div>
+                            <button type="submit" class="w-full bg-blue-600 text-white py-2 rounded font-bold hover:bg-blue-700">Create User</button>
+                        </form>
+                    </div>
+
+                    <div class="md:col-span-2 bg-white rounded shadow border overflow-x-auto">
+                        <table class="w-full text-left">
+                            <thead class="bg-gray-100">
+                                <tr>
+                                    <th class="p-3 text-sm">Name</th>
+                                    <th class="p-3 text-sm">Email</th>
+                                    <th class="p-3 text-sm">Role</th>
+                                    <th class="p-3 text-sm">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {db.users.map(user => (
+                                    <tr key={user.id} class="border-t">
+                                        <td class="p-3 font-semibold">{user.name}</td>
+                                        <td class="p-3 text-sm text-gray-600">{user.email}</td>
+                                        <td class="p-3 text-sm">
+                                            <span class={`px-2 py-1 rounded-full text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-green-100 text-green-700'}`}>
+                                                {user.role.toUpperCase()}
+                                            </span>
+                                        </td>
+                                        <td class="p-3">
+                                            {user.id !== '1' && (
+                                                <button onClick={() => removeUser(user.id)} class="text-red-500 hover:text-red-700 text-sm font-bold"><i class="fa-solid fa-trash mr-1"></i> Remove</button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             );
         }
