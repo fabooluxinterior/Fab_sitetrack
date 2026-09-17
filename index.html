@@ -15,7 +15,7 @@
             theme: {
                 extend: {
                     colors: {
-                        primary: '#4f46e5', // Indigo-600 matching reference
+                        primary: '#4f46e5',
                         primaryHover: '#4338ca',
                         bgLight: '#f8fafc',
                     },
@@ -33,7 +33,6 @@
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        /* Custom Input styling for the modern look */
         .modern-input { padding-left: 2.75rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; transition: all 0.2s; }
         .modern-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); outline: none; }
     </style>
@@ -42,9 +41,25 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect, useRef, useMemo } = React;
+        const { useState, useEffect, useRef } = React;
 
-        // --- DATABASE HOOK (Local Storage) ---
+        class ErrorBoundary extends React.Component {
+            constructor(props) { super(props); this.state = { error: null }; }
+            static getDerivedStateFromError(error) { return { error: error.toString() }; }
+            render() {
+                if (this.state.error) {
+                    return (
+                        <div class="p-6 bg-red-50 text-red-700 min-h-screen">
+                            <h2 class="text-xl font-bold mb-2">App Crashed (Old Data Conflict)</h2>
+                            <p class="font-mono text-sm mb-4 break-words">{this.state.error}</p>
+                            <button onClick={() => { localStorage.clear(); window.location.reload(); }} class="bg-red-600 text-white px-4 py-2 rounded font-bold">Clear Data & Reset App</button>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
         const useDatabase = () => {
             const defaultUsers = [{ id: '1', email: 'designer8fab@gmail.com', password: 'Fab999', role: 'admin', name: 'Admin Fab' }];
             const [logs, setLogs] = useState(() => JSON.parse(localStorage.getItem('siteLogs')) || []);
@@ -63,22 +78,13 @@
             return { logs, setLogs, activeSites, setActiveSites, users, setUsers, currentUser, setCurrentUser };
         };
 
-        // --- MAIN APP COMPONENT ---
         function App() {
             const db = useDatabase();
-
-            if (!db.currentUser) {
-                return <LoginScreen db={db} />;
-            }
-
-            if (db.currentUser.role === 'admin') {
-                return <AdminLayout db={db} />;
-            }
-
+            if (!db.currentUser) return <LoginScreen db={db} />;
+            if (db.currentUser.role === 'admin') return <AdminLayout db={db} />;
             return <CoordinatorApp db={db} />;
         }
 
-        // --- LOGIN SCREEN (Matches image_527ea3.png) ---
         function LoginScreen({ db }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
@@ -87,12 +93,8 @@
             const handleLogin = (e) => {
                 e.preventDefault();
                 const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.password === password);
-                if (user) {
-                    window.location.hash = 'dashboard'; 
-                    db.setCurrentUser(user);
-                } else {
-                    setError('Invalid email or password.');
-                }
+                if (user) { window.location.hash = 'dashboard'; db.setCurrentUser(user); } 
+                else { setError('Invalid email or password.'); }
             };
 
             return (
@@ -124,29 +126,15 @@
                                 </div>
                             </div>
                             
-                            <div class="flex justify-between items-center pt-2">
-                                <label class="flex items-center space-x-2 cursor-pointer">
-                                    <input type="checkbox" class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary" />
-                                    <span class="text-sm text-slate-500 font-medium">Remember me</span>
-                                </label>
-                                <a href="#" class="text-sm text-primary font-bold hover:underline">Forgot?</a>
-                            </div>
-
                             <button type="submit" class="w-full bg-primary text-white py-3.5 rounded-xl font-bold text-lg hover:bg-primaryHover transition shadow-lg shadow-primary/25 mt-4">
                                 Sign In
                             </button>
                         </form>
                     </div>
-                    
-                    <div class="mt-12 text-center text-sm text-slate-400 font-medium">
-                        <p>Manage your field sites efficiently.</p>
-                        <p>© 2024 Site Track Systems</p>
-                    </div>
                 </div>
             );
         }
 
-        // --- COORDINATOR APP ---
         function CoordinatorApp({ db }) {
             const currentUser = db.currentUser;
             const [view, setView] = useState(() => window.location.hash.replace('#', '') || 'home'); 
@@ -211,7 +199,7 @@
                                                 <span class="bg-green-50 text-green-700 text-xs font-bold px-2.5 py-1 rounded-md border border-green-100">On-site</span>
                                             </div>
                                             <div class="flex items-center justify-between border-t border-slate-50 pt-4">
-                                                <p class="text-xs text-slate-500 font-medium"><i class="fa-regular fa-clock mr-1"></i> In: {new Date(site.checkInTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+                                                <p class="text-xs text-slate-500 font-medium"><i class="fa-regular fa-clock mr-1"></i> In: {new Date(site.checkInTime).toLocaleTimeString('en-US',{hour: '2-digit', minute:'2-digit'})}</p>
                                                 <button onClick={() => { setSelectedSite(site); navigateTo('checkout'); }} class="text-primary font-bold text-sm bg-indigo-50 px-4 py-2 rounded-lg hover:bg-indigo-100 transition">
                                                     Check Out
                                                 </button>
@@ -226,13 +214,11 @@
             );
         }
 
-        // --- CHECK-IN FLOW (Matches image_52858f.png) ---
         function CheckInFlow({ db, currentUser, goBack }) {
             const [step, setStep] = useState(1);
             const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
-            const [gpsLocked, setGpsLocked] = useState(false);
 
             const handleFinalSubmit = () => {
                 const newSite = {
@@ -248,85 +234,36 @@
             return (
                 <div class="max-w-md mx-auto bg-white min-h-screen animate-fade-in flex flex-col">
                     <header class="flex items-center p-4 border-b border-slate-100 sticky top-0 bg-white z-10">
-                        <button onClick={step === 1 ? goBack : () => setStep(1)} class="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-50 rounded-full transition">
-                            <i class="fa-solid fa-arrow-left text-lg"></i>
-                        </button>
+                        <button onClick={step === 1 ? goBack : () => setStep(1)} class="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-slate-800 hover:bg-slate-50 rounded-full transition"><i class="fa-solid fa-arrow-left text-lg"></i></button>
                         <h1 class="flex-grow text-center font-extrabold text-lg text-slate-900 pr-10">New Site Visit</h1>
                     </header>
 
-                    <div class="px-6 py-4 flex gap-2">
-                        <div class="h-1 flex-1 rounded-full bg-primary"></div>
-                        <div class={`h-1 flex-1 rounded-full ${step >= 2 ? 'bg-primary' : 'bg-slate-200'}`}></div>
-                        <div class="h-1 flex-1 rounded-full bg-slate-200"></div>
-                    </div>
-
-                    <div class="px-6 flex-grow">
+                    <div class="px-6 flex-grow pt-4">
                         {step === 1 ? (
                             <form onSubmit={(e) => { e.preventDefault(); setStep(2); }} class="space-y-6">
-                                <div>
-                                    <h2 class="text-2xl font-extrabold text-slate-900 mb-1">Site Details</h2>
-                                    <p class="text-sm text-slate-500 mb-6">Please identify the location you are visiting.</p>
-                                </div>
+                                <div><h2 class="text-2xl font-extrabold text-slate-900 mb-1">Site Details</h2></div>
                                 
                                 <div>
                                     <label class="block text-sm font-bold mb-2 text-slate-700">Site Name</label>
-                                    <input required type="text" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition" placeholder="e.g., Downtown Plaza Phase 2" value={formData.siteName} onChange={e => setFormData({...formData, siteName: e.target.value})} />
+                                    <input required type="text" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.siteName} onChange={e => setFormData({...formData, siteName: e.target.value})} />
                                 </div>
                                 <div>
-                                    <label class="block text-sm font-bold mb-2 text-slate-700">Site Location / Zone</label>
-                                    <div class="relative">
-                                        <i class="fa-solid fa-location-dot absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
-                                        <input required type="text" class="w-full py-3 modern-input" placeholder="e.g., Sector 4, Ground Floor" value={formData.locationDetails} onChange={e => setFormData({...formData, locationDetails: e.target.value})} />
-                                    </div>
+                                    <label class="block text-sm font-bold mb-2 text-slate-700">Location</label>
+                                    <input required type="text" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.locationDetails} onChange={e => setFormData({...formData, locationDetails: e.target.value})} />
                                 </div>
                                 <div>
                                     <label class="block text-sm font-bold mb-2 text-slate-700">Total Workers Present</label>
-                                    <div class="relative">
-                                        <i class="fa-solid fa-users absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
-                                        <input required type="number" class="w-full py-3 modern-input" placeholder="0" value={formData.workers} onChange={e => setFormData({...formData, workers: e.target.value})} />
-                                    </div>
+                                    <input required type="number" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.workers} onChange={e => setFormData({...formData, workers: e.target.value})} />
                                 </div>
                                 
-                                <div class="bg-[#e6fcf0] border border-[#a3f0c9] p-4 rounded-xl flex items-center gap-4 mt-8">
-                                    <div class="bg-white w-10 h-10 rounded-full flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-100">
-                                        <i class="fa-solid fa-location-arrow"></i>
-                                    </div>
-                                    <div>
-                                        <p class="font-extrabold text-emerald-900 text-sm">GPS Position Pending</p>
-                                        <p class="text-xs text-emerald-700">Will lock in next step</p>
-                                    </div>
-                                </div>
-
-                                <div class="pb-8 pt-4">
-                                    <button type="submit" class="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/25 hover:bg-primaryHover transition flex justify-center items-center">
-                                        Next: Verify Identity <i class="fa-solid fa-arrow-right ml-2"></i>
-                                    </button>
-                                </div>
+                                <button type="submit" class="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-primaryHover transition">Next: Verify Identity</button>
                             </form>
                         ) : (
                             <div class="pb-8">
-                                <div>
-                                    <h2 class="text-2xl font-extrabold text-slate-900 mb-1">Verify Identity</h2>
-                                    <p class="text-sm text-slate-500 mb-6">Capture a photo on-site. GPS will be recorded.</p>
-                                </div>
-                                <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); setGpsLocked(!!loc); }} />
-                                
-                                {gpsLocked && (
-                                    <div class="bg-[#e6fcf0] border border-[#a3f0c9] p-4 rounded-xl flex items-center gap-4 mt-6 animate-fade-in">
-                                        <div class="bg-white w-10 h-10 rounded-full flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-100">
-                                            <i class="fa-solid fa-location-arrow"></i>
-                                        </div>
-                                        <div>
-                                            <p class="font-extrabold text-emerald-900 text-sm">GPS Position Locked</p>
-                                            <p class="text-xs text-emerald-700">Accuracy: ± 4 meters</p>
-                                        </div>
-                                    </div>
-                                )}
-
+                                <h2 class="text-2xl font-extrabold text-slate-900 mb-4">Verify Identity</h2>
+                                <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
                                 {photo && location && (
-                                    <button onClick={handleFinalSubmit} class="w-full bg-primary text-white py-4 rounded-xl mt-6 font-bold text-lg hover:bg-primaryHover shadow-lg shadow-primary/25 active:scale-95 transition">
-                                        Confirm & Check In
-                                    </button>
+                                    <button onClick={handleFinalSubmit} class="w-full bg-primary text-white py-4 rounded-xl mt-6 font-bold text-lg hover:bg-primaryHover shadow-lg transition">Confirm & Check In</button>
                                 )}
                             </div>
                         )}
@@ -335,7 +272,6 @@
             );
         }
 
-        // --- CHECK-OUT FLOW ---
         function CheckOutFlow({ db, siteToCheckout, goBack }) {
             const [notes, setNotes] = useState('');
             const [photo, setPhoto] = useState(null);
@@ -359,43 +295,32 @@
                     </header>
                     <div class="px-6 py-6 flex-grow">
                         <div class="mb-6">
-                            <h2 class="text-xl font-extrabold text-slate-900 mb-1">{siteToCheckout.siteName}</h2>
-                            <p class="text-sm text-slate-500">Log your departure and final remarks.</p>
-                        </div>
-                        <div class="mb-6">
                             <label class="block text-sm font-bold text-slate-700 mb-2">Closing Remarks</label>
-                            <textarea class="w-full border border-slate-200 p-4 rounded-xl h-28 focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none resize-none transition bg-slate-50" placeholder="Progress notes or issues..." value={notes} onChange={e => setNotes(e.target.value)}></textarea>
+                            <textarea class="w-full border border-slate-200 p-4 rounded-xl h-28 focus:border-primary outline-none resize-none transition bg-slate-50" value={notes} onChange={e => setNotes(e.target.value)}></textarea>
                         </div>
-                        <h3 class="font-extrabold mb-3 text-slate-800 text-sm uppercase tracking-wider">Verification Photo</h3>
                         <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
                         {photo && location && (
-                            <button onClick={handleFinalSubmit} class="w-full bg-slate-900 text-white py-4 rounded-xl mt-8 font-bold text-lg hover:bg-slate-800 shadow-xl shadow-slate-900/20 active:scale-95 transition">
-                                Complete Check-Out
-                            </button>
+                            <button onClick={handleFinalSubmit} class="w-full bg-slate-900 text-white py-4 rounded-xl mt-8 font-bold text-lg hover:bg-slate-800 shadow-xl transition">Complete Check-Out</button>
                         )}
                     </div>
                 </div>
             );
         }
 
-        // --- CAMERA API ---
         function CameraAndLocation({ onCapture }) {
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const [stream, setStream] = useState(null);
             const [capturedImg, setCapturedImg] = useState(null);
-            const [loadingGeo, setLoadingGeo] = useState(false);
-            const [errorMsg, setErrorMsg] = useState('');
 
             useEffect(() => { startCamera(); return () => stopCamera(); }, []);
 
             const startCamera = async () => {
                 try {
-                    setErrorMsg('');
                     const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
                     setStream(mediaStream);
                     if (videoRef.current) videoRef.current.srcObject = mediaStream;
-                } catch (err) { setErrorMsg("Camera access denied."); }
+                } catch (err) {}
             };
 
             const stopCamera = () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
@@ -406,33 +331,21 @@
                 canvas.width = video.videoWidth; canvas.height = video.videoHeight;
                 canvas.getContext('2d').drawImage(video, 0, 0);
                 const imgData = canvas.toDataURL('image/jpeg', 0.6); 
-                setCapturedImg(imgData); stopCamera(); setLoadingGeo(true);
+                setCapturedImg(imgData); stopCamera();
 
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
-                        (position) => {
-                            const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
-                            setLoadingGeo(false); onCapture(imgData, loc);
-                        },
-                        () => {
-                            const fallback = { lat: 0, lng: 0 };
-                            setLoadingGeo(false); onCapture(imgData, fallback);
-                        },
+                        (position) => onCapture(imgData, { lat: position.coords.latitude, lng: position.coords.longitude }),
+                        () => onCapture(imgData, { lat: 0, lng: 0 }),
                         { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
                     );
-                } else { setLoadingGeo(false); }
+                }
             };
-
-            if (errorMsg) return <div class="bg-red-50 text-red-600 p-4 rounded-xl border border-red-100 text-sm font-semibold">{errorMsg}</div>;
 
             if (capturedImg) {
                 return (
                     <div class="relative rounded-2xl overflow-hidden border-4 border-white shadow-md">
-                        <img src={capturedImg} class="w-full h-64 object-cover" alt="Selfie" />
-                        <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end p-4">
-                             {loadingGeo ? <span class="text-white text-sm font-bold drop-shadow"><i class="fa-solid fa-spinner fa-spin mr-2"></i> Locking GPS...</span> 
-                                        : <span class="text-emerald-400 text-sm font-bold drop-shadow"><i class="fa-solid fa-check-circle mr-1"></i> Location Secured</span>}
-                        </div>
+                        <img src={capturedImg} class="w-full h-64 object-cover" />
                         <button onClick={() => {setCapturedImg(null); onCapture(null,null); startCamera();}} class="absolute top-3 right-3 bg-white/90 text-slate-800 p-2 rounded-full shadow hover:bg-white"><i class="fa-solid fa-rotate-right"></i></button>
                     </div>
                 );
@@ -443,30 +356,23 @@
                     <video ref={videoRef} autoPlay playsInline muted class="w-full h-full object-cover"></video>
                     <canvas ref={canvasRef} class="hidden"></canvas>
                     <div class="absolute bottom-6 left-0 right-0 flex justify-center">
-                        <button onClick={captureData} class="bg-white text-primary w-16 h-16 rounded-full shadow-2xl border-4 border-slate-200/50 flex items-center justify-center hover:scale-105 active:scale-95 transition">
-                            <i class="fa-solid fa-camera text-2xl"></i>
-                        </button>
+                        <button onClick={captureData} class="bg-white text-primary w-16 h-16 rounded-full shadow-2xl border-4 border-slate-200/50 flex items-center justify-center hover:scale-105 active:scale-95 transition"><i class="fa-solid fa-camera text-2xl"></i></button>
                     </div>
                 </div>
             );
         }
 
-        // --- SUPER DASHBOARD (Matches image_528649.png) ---
         function AdminLayout({ db }) {
             const [currentTab, setCurrentTab] = useState('dashboard');
             const handleLogout = () => { db.setCurrentUser(null); };
 
             return (
                 <div class="flex h-screen overflow-hidden bg-bgLight">
-                    {/* Sidebar */}
                     <aside class="w-64 bg-white border-r border-slate-100 hidden md:flex flex-col flex-shrink-0 z-20">
                         <div class="p-6 flex items-center gap-3">
-                            <div class="bg-primary text-white w-8 h-8 rounded-lg flex items-center justify-center shadow">
-                                <i class="fa-solid fa-location-dot text-sm"></i>
-                            </div>
+                            <div class="bg-primary text-white w-8 h-8 rounded-lg flex items-center justify-center shadow"><i class="fa-solid fa-location-dot text-sm"></i></div>
                             <span class="font-extrabold text-xl text-slate-900 tracking-tight">Site Track</span>
                         </div>
-                        
                         <nav class="flex-1 px-4 space-y-1 mt-2">
                             {[
                                 { id: 'dashboard', icon: 'fa-border-all', label: 'Dashboard' },
@@ -479,54 +385,21 @@
                                 </button>
                             ))}
                         </nav>
-                        
-                        <div class="p-6 border-t border-slate-100">
-                            <div class="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                                <p class="text-xs font-bold text-slate-800 mb-1">System Status</p>
-                                <p class="text-xs text-slate-500 mb-2">All services operational</p>
-                                <div class="flex items-center gap-1.5 text-emerald-600 text-xs font-bold">
-                                    <div class="w-2 h-2 rounded-full bg-emerald-500"></div> Live sync active
-                                </div>
-                            </div>
-                        </div>
                     </aside>
 
-                    {/* Main Content */}
                     <main class="flex-1 flex flex-col h-full overflow-hidden relative">
-                        {/* Mobile Header */}
                         <div class="md:hidden bg-white border-b border-slate-100 p-4 flex justify-between items-center z-20">
-                            <div class="flex items-center gap-2">
-                                <div class="bg-primary text-white w-8 h-8 rounded flex items-center justify-center"><i class="fa-solid fa-location-dot text-xs"></i></div>
-                                <span class="font-bold text-slate-900">Site Track</span>
-                            </div>
-                            <div class="flex gap-2">
-                                <select value={currentTab} onChange={(e) => setCurrentTab(e.target.value)} class="border border-slate-200 rounded p-1 text-sm bg-white outline-none">
-                                    <option value="dashboard">Dashboard</option><option value="logs">Logs</option><option value="users">Users</option>
-                                </select>
-                            </div>
+                            <span class="font-bold text-slate-900">Site Track</span>
+                            <select value={currentTab} onChange={(e) => setCurrentTab(e.target.value)} class="border border-slate-200 rounded p-1 text-sm bg-white outline-none">
+                                <option value="dashboard">Dashboard</option><option value="logs">Logs</option><option value="users">Users</option>
+                            </select>
                         </div>
-
-                        {/* Top Navbar Desktop */}
-                        <header class="hidden md:flex bg-white h-20 border-b border-slate-100 items-center justify-between px-8 z-10 flex-shrink-0">
-                            <div class="flex-1 max-w-xl">
-                                <div class="relative">
-                                    <i class="fa-solid fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
-                                    <input type="text" placeholder="Search sites, workers..." class="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-11 pr-4 focus:ring-2 focus:ring-primary/20 text-sm outline-none" />
-                                </div>
-                            </div>
-                            <div class="flex items-center gap-6">
-                                <button class="text-slate-400 hover:text-slate-600 relative"><i class="fa-regular fa-bell text-xl"></i><span class="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full border border-white"></span></button>
-                                <div class="flex items-center gap-3 border-l border-slate-200 pl-6 cursor-pointer" onClick={handleLogout} title="Click to Logout">
-                                    <img src={`https://ui-avatars.com/api/?name=Admin&background=4f46e5&color=fff`} class="w-9 h-9 rounded-full shadow-sm" />
-                                    <div class="hidden lg:block text-left">
-                                        <p class="text-sm font-extrabold text-slate-900 leading-tight">Admin</p>
-                                        <p class="text-xs text-slate-500 font-medium">Operations Lead</p>
-                                    </div>
-                                </div>
+                        <header class="hidden md:flex bg-white h-20 border-b border-slate-100 items-center justify-end px-8 z-10 flex-shrink-0">
+                            <div class="flex items-center gap-3 cursor-pointer" onClick={handleLogout} title="Click to Logout">
+                                <img src={`https://ui-avatars.com/api/?name=Admin&background=4f46e5&color=fff`} class="w-9 h-9 rounded-full shadow-sm" />
+                                <div class="text-left"><p class="text-sm font-extrabold text-slate-900 leading-tight">Admin</p></div>
                             </div>
                         </header>
-
-                        {/* Content Area */}
                         <div class="flex-1 overflow-auto p-4 md:p-8">
                             {currentTab === 'dashboard' && <DashboardView db={db} />}
                             {currentTab === 'logs' && <LogsView db={db} />}
@@ -537,69 +410,48 @@
             );
         }
 
-        // --- DASHBOARD VIEW (Cards & Live Table) ---
         function DashboardView({ db }) {
             const todayStr = new Date().toISOString().split('T')[0];
-            const todayVisits = db.logs.filter(l => l.checkInTime.startsWith(todayStr)).length;
+            const todayVisits = db.logs.filter(l => l.checkInTime?.startsWith(todayStr)).length;
             const totalWorkers = db.activeSites.reduce((sum, site) => sum + (parseInt(site.workers)||0), 0);
+            const [selectedLog, setSelectedLog] = useState(null);
             
-            // Combine active sites (On-site) and today's logs (Departed) for the live feed
             const liveFeed = [
                 ...db.activeSites.map(s => ({...s, status: 'On-site', sortTime: s.checkInTime})),
-                ...db.logs.filter(l => l.checkInTime.startsWith(todayStr)).map(l => ({...l, status: 'Departed', sortTime: l.checkOutTime}))
+                ...db.logs.filter(l => l.checkInTime?.startsWith(todayStr)).map(l => ({...l, status: 'Departed', sortTime: l.checkOutTime}))
             ].sort((a,b) => new Date(b.sortTime) - new Date(a.sortTime));
 
             return (
                 <div class="max-w-6xl mx-auto animate-fade-in">
-                    <div class="mb-8">
-                        <h2 class="text-2xl font-extrabold text-slate-900 mb-1">Good morning, Admin</h2>
-                        <p class="text-sm text-slate-500 font-medium">Here is what is happening across your field sites today.</p>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6 mb-8">
-                        <StatCard icon="fa-building" label="Active Sites" value={db.activeSites.length} trend="+2" trendColor="text-emerald-500" iconBg="text-primary bg-indigo-50" />
-                        <StatCard icon="fa-calendar-check" label="Today's Visits" value={todayVisits} trend="+8%" trendColor="text-emerald-500" iconBg="text-blue-500 bg-blue-50" />
-                        <StatCard icon="fa-users" label="Total Workers" value={totalWorkers} detail="on shift" iconBg="text-amber-500 bg-amber-50" />
-                        <StatCard icon="fa-circle-exclamation" label="Open Incidents" value={db.activeSites.length > 5 ? 1 : 0} trend={db.activeSites.length > 5 ? "+1" : "0"} trendColor="text-red-500" iconBg="text-red-500 bg-red-50" />
+                    <div class="mb-8"><h2 class="text-2xl font-extrabold text-slate-900 mb-1">Dashboard</h2></div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <StatCard icon="fa-building" label="Active Sites" value={db.activeSites.length} iconBg="text-primary bg-indigo-50" />
+                        <StatCard icon="fa-calendar-check" label="Today's Visits" value={todayVisits} iconBg="text-blue-500 bg-blue-50" />
+                        <StatCard icon="fa-users" label="Total Workers" value={totalWorkers} iconBg="text-amber-500 bg-amber-50" />
                     </div>
 
                     <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                        <div class="p-6 border-b border-slate-100 flex justify-between items-end">
-                            <div>
-                                <h3 class="font-bold text-slate-900 text-lg mb-1">Recent Site Visits</h3>
-                                <p class="text-xs text-slate-500 font-medium">Live check-ins across all monitored locations</p>
-                            </div>
-                            <button class="text-primary font-bold text-sm hover:text-primaryHover transition"><i class="fa-solid fa-download mr-1"></i> Export</button>
-                        </div>
+                        <div class="p-6 border-b border-slate-100"><h3 class="font-bold text-slate-900 text-lg">Recent Visits</h3></div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left whitespace-nowrap">
                                 <thead>
-                                    <tr class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase tracking-wider border-b border-slate-100">
+                                    <tr class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase border-b border-slate-100">
                                         <th class="p-4 pl-6">Coordinator Name</th>
                                         <th class="p-4">Site Name</th>
                                         <th class="p-4">Time</th>
-                                        <th class="p-4 text-center">Worker Count</th>
                                         <th class="p-4">Status</th>
+                                        <th class="p-4 text-center">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {liveFeed.length === 0 && <tr><td colSpan="5" class="p-8 text-center text-slate-400 text-sm font-medium">No activity today.</td></tr>}
                                     {liveFeed.map((item, idx) => (
                                         <tr key={idx} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
-                                            <td class="p-4 pl-6 flex items-center gap-3">
-                                                <img src={`https://ui-avatars.com/api/?name=${item.coordinatorName}&background=random`} class="w-8 h-8 rounded-full" />
-                                                <span class="font-bold text-slate-800 text-sm">{item.coordinatorName}</span>
-                                            </td>
-                                            <td class="p-4">
-                                                <p class="font-bold text-slate-800 text-sm">{item.siteName}</p>
-                                                <p class="text-xs text-slate-400 font-medium"><i class="fa-solid fa-location-dot mr-1 text-slate-300"></i>{item.locationDetails}</p>
-                                            </td>
-                                            <td class="p-4 text-sm text-slate-600 font-medium">{new Date(item.sortTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</td>
-                                            <td class="p-4 text-center font-bold text-slate-700 text-sm">{item.workers}</td>
-                                            <td class="p-4">
-                                                <span class={`px-2.5 py-1 rounded-md text-xs font-bold border ${item.status==='On-site' ? 'bg-[#e6fcf0] text-emerald-700 border-[#a3f0c9]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                                                    {item.status}
-                                                </span>
+                                            <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{item.coordinatorName}</td>
+                                            <td class="p-4 font-bold text-slate-800 text-sm">{item.siteName}</td>
+                                            <td class="p-4 text-sm text-slate-600 font-medium">{new Date(item.sortTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</td>
+                                            <td class="p-4"><span class={`px-2.5 py-1 rounded-md text-xs font-bold border ${item.status==='On-site' ? 'bg-[#e6fcf0] text-emerald-700 border-[#a3f0c9]' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>{item.status}</span></td>
+                                            <td class="p-4 text-center">
+                                                <button onClick={() => setSelectedLog(item)} class="text-primary font-bold text-xs bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View Details</button>
                                             </td>
                                         </tr>
                                     ))}
@@ -607,43 +459,42 @@
                             </table>
                         </div>
                     </div>
+                    {selectedLog && <LogDetailsModal log={selectedLog} onClose={() => setSelectedLog(null)} />}
                 </div>
             );
         }
 
-        function StatCard({ icon, label, value, trend, trendColor, detail, iconBg }) {
+        function StatCard({ icon, label, value, iconBg }) {
             return (
-                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
-                    <div class="flex justify-between items-start mb-4">
-                        <div class={`w-10 h-10 rounded-xl flex items-center justify-center ${iconBg}`}>
-                            <i class={`fa-solid ${icon}`}></i>
-                        </div>
-                        {trend && <span class={`text-xs font-bold ${trendColor}`}>{trend}</span>}
-                        {detail && <span class="text-xs font-medium text-slate-400">{detail}</span>}
-                    </div>
-                    <div>
-                        <h4 class="text-3xl font-extrabold text-slate-900 leading-tight mb-1">{value}</h4>
-                        <p class="text-sm font-medium text-slate-500">{label}</p>
-                    </div>
+                <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex items-center gap-4">
+                    <div class={`w-12 h-12 rounded-xl flex items-center justify-center text-xl ${iconBg}`}><i class={`fa-solid ${icon}`}></i></div>
+                    <div><h4 class="text-2xl font-extrabold text-slate-900">{value}</h4><p class="text-sm font-medium text-slate-500">{label}</p></div>
                 </div>
             );
         }
 
-        // --- HISTORICAL LOGS VIEW ---
         function LogsView({ db }) {
             const [filterName, setFilterName] = useState('');
+            const [filterDate, setFilterDate] = useState('');
             const [selectedLog, setSelectedLog] = useState(null);
 
-            const filteredLogs = db.logs.filter(log => log.coordinatorName.toLowerCase().includes(filterName.toLowerCase()))
-                                        .sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime));
+            const filteredLogs = db.logs.filter(log => {
+                const matchName = log.coordinatorName?.toLowerCase().includes(filterName.toLowerCase());
+                const logDate = log.checkInTime ? new Date(log.checkInTime).toISOString().split('T')[0] : '';
+                const matchDate = filterDate ? logDate === filterDate : true;
+                return matchName && matchDate;
+            }).sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime));
 
             return (
                 <div class="max-w-6xl mx-auto animate-fade-in">
-                    <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div class="mb-6 flex flex-col md:flex-row justify-between md:items-center gap-4">
                         <h2 class="text-xl font-extrabold text-slate-900">Historical Records</h2>
-                        <div class="relative w-full sm:w-64">
-                            <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 text-sm"></i>
-                            <input type="text" placeholder="Filter by Name..." class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-primary outline-none" value={filterName} onChange={e => setFilterName(e.target.value)} />
+                        <div class="flex flex-col sm:flex-row gap-3">
+                            <input type="date" class="px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-600 focus:border-primary outline-none" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
+                            <div class="relative w-full sm:w-64">
+                                <i class="fa-solid fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400 text-sm"></i>
+                                <input type="text" placeholder="Filter by Name..." class="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:border-primary outline-none" value={filterName} onChange={e => setFilterName(e.target.value)} />
+                            </div>
                         </div>
                     </div>
 
@@ -651,7 +502,7 @@
                         <table class="w-full text-left whitespace-nowrap">
                             <thead class="bg-slate-50/50 text-slate-400 text-xs font-bold uppercase border-b border-slate-100">
                                 <tr>
-                                    <th class="p-4 pl-6">Date & Time</th>
+                                    <th class="p-4 pl-6">Date</th>
                                     <th class="p-4">Coordinator</th>
                                     <th class="p-4">Site Visited</th>
                                     <th class="p-4 text-center">Action</th>
@@ -661,17 +512,10 @@
                                 {filteredLogs.length === 0 && <tr><td colSpan="4" class="p-8 text-center text-slate-400 text-sm">No records found.</td></tr>}
                                 {filteredLogs.map(log => (
                                     <tr key={log.id} class="border-b border-slate-50 hover:bg-slate-50/50 transition">
-                                        <td class="p-4 pl-6 text-sm">
-                                            <p class="font-bold text-slate-800">{new Date(log.checkInTime).toLocaleDateString()}</p>
-                                            <p class="text-xs text-slate-500">{new Date(log.checkInTime).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</p>
-                                        </td>
+                                        <td class="p-4 pl-6 font-bold text-slate-800 text-sm">{new Date(log.checkInTime).toLocaleDateString()}</td>
                                         <td class="p-4 font-bold text-sm text-slate-800">{log.coordinatorName}</td>
-                                        <td class="p-4">
-                                            <p class="font-bold text-slate-800 text-sm">{log.siteName}</p>
-                                        </td>
-                                        <td class="p-4 text-center">
-                                            <button onClick={() => setSelectedLog(log)} class="text-primary font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View Details</button>
-                                        </td>
+                                        <td class="p-4 font-bold text-slate-800 text-sm">{log.siteName}</td>
+                                        <td class="p-4 text-center"><button onClick={() => setSelectedLog(log)} class="text-primary font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100">View Details</button></td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -705,20 +549,29 @@
                             <div class="grid sm:grid-cols-2 gap-6">
                                 <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
                                     <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-In</h4>
-                                    <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkInTime).toLocaleString()}</p>
+                                    <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkInTime).toLocaleString('en-US')}</p>
                                     <img src={log.checkInPhoto} class="w-full h-48 object-cover rounded-lg mb-3 shadow-sm border border-slate-200" />
-                                    <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline"><i class="fa-solid fa-map-marker-alt"></i> View GPS Map</a>
+                                    <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
                                 </div>
                                 <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
                                     <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-Out</h4>
-                                    <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkOutTime).toLocaleString()}</p>
-                                    <img src={log.checkOutPhoto} class="w-full h-48 object-cover rounded-lg mb-3 shadow-sm border border-slate-200" />
-                                    <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline"><i class="fa-solid fa-map-marker-alt"></i> View GPS Map</a>
+                                    {log.checkOutTime ? (
+                                        <>
+                                            <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkOutTime).toLocaleString('en-US')}</p>
+                                            <img src={log.checkOutPhoto} class="w-full h-48 object-cover rounded-lg mb-3 shadow-sm border border-slate-200" />
+                                            <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
+                                        </>
+                                    ) : (
+                                        <div class="flex flex-col items-center justify-center h-48 text-slate-400">
+                                            <i class="fa-solid fa-clock-rotate-left text-3xl mb-2"></i>
+                                            <p class="text-sm font-medium italic">User is still on-site</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                             <div class="mt-6 bg-amber-50 border border-amber-100 p-4 rounded-xl">
                                 <p class="text-xs font-bold text-amber-800 mb-1 uppercase">Closing Remarks</p>
-                                <p class="text-slate-800 text-sm font-medium">{log.notes || 'None provided.'}</p>
+                                <p class="text-slate-800 text-sm font-medium">{log.notes || (log.checkOutTime ? 'None provided.' : 'Pending check-out.')}</p>
                             </div>
                         </div>
                     </div>
@@ -726,7 +579,6 @@
             );
         }
 
-        // --- USER MANAGEMENT VIEW ---
         function UserManagementView({ db }) {
             const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'coordinator' });
 
@@ -785,14 +637,8 @@
                                             <p class="font-bold text-slate-800 text-sm">{user.name}</p>
                                             <p class="text-xs text-slate-500 font-medium">{user.email}</p>
                                         </td>
-                                        <td class="p-4 text-center">
-                                            <span class={`px-2.5 py-1 rounded-md text-xs font-bold ${user.role === 'admin' ? 'bg-indigo-50 text-primary border border-indigo-100' : 'bg-slate-100 text-slate-600 border border-slate-200'}`}>
-                                                {user.role.toUpperCase()}
-                                            </span>
-                                        </td>
-                                        <td class="p-4 text-center">
-                                            {user.id !== '1' && <button onClick={() => removeUser(user.id)} class="text-red-500 hover:bg-red-50 p-2 rounded transition"><i class="fa-solid fa-trash"></i></button>}
-                                        </td>
+                                        <td class="p-4 text-center"><span class="px-2.5 py-1 rounded-md text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200">{user.role.toUpperCase()}</span></td>
+                                        <td class="p-4 text-center">{user.id !== '1' && <button onClick={() => removeUser(user.id)} class="text-red-500 hover:bg-red-50 p-2 rounded transition"><i class="fa-solid fa-trash"></i></button>}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -803,7 +649,7 @@
         }
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(<ErrorBoundary><App /></ErrorBoundary>);
     </script>
 </body>
 </html>
