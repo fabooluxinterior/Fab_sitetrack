@@ -31,8 +31,10 @@
         body { background-color: #f8fafc; font-family: 'Inter', sans-serif; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .animate-fade-in { animation: fadeIn 0.25s ease-out; }
+        .animate-fade-in { animation: fadeIn 0.25s ease-out forwards; }
+        .animate-slide-down { animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideDown { from { opacity: 0; transform: translate(-50%, -20px); } to { opacity: 1; transform: translate(-50%, 0); } }
         .modern-input { padding-left: 2.75rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; transition: all 0.2s; }
         .modern-input:focus { border-color: #4f46e5; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); outline: none; }
     </style>
@@ -52,7 +54,6 @@
             { id: '1', email: 'designer8fab@gmail.com', password: 'Fab999', role: 'admin', name: 'Admin Fab' }
         ];
 
-        // Zero-lag Local-First Cache Database Engine
         const useDatabase = () => {
             const [logs, setLogs] = useState(() => JSON.parse(localStorage.getItem('st_logs') || '[]'));
             const [activeSites, setActiveSites] = useState(() => JSON.parse(localStorage.getItem('st_active') || '[]'));
@@ -68,7 +69,6 @@
                 else localStorage.removeItem('st_cur_user');
             }, [currentUser]);
 
-            // Background fetch from Google Sheet (keeps UI instant, pulls updates quietly)
             const syncFromGoogleSheet = async () => {
                 if (!GOOGLE_SHEET_API_URL || GOOGLE_SHEET_API_URL.includes("YOUR_GOOGLE_APPS")) return;
                 try {
@@ -78,9 +78,7 @@
                     if (data.users && data.users.length > 0) {
                         const mergedUsers = [...DEFAULT_USERS];
                         data.users.forEach(u => {
-                            if (!mergedUsers.some(mu => mu.email.toLowerCase() === u.email.toLowerCase())) {
-                                mergedUsers.push(u);
-                            }
+                            if (!mergedUsers.some(mu => mu.email.toLowerCase() === u.email.toLowerCase())) mergedUsers.push(u);
                         });
                         setUsers(mergedUsers);
                     }
@@ -90,20 +88,14 @@
                         setLogs(completed);
                         setActiveSites(active);
                     }
-                } catch(err) {
-                    console.log("Offline mode or sync delay:", err);
-                } finally {
-                    setIsSyncing(false);
-                }
+                } catch(err) { console.log("Offline mode or sync delay"); } 
+                finally { setIsSyncing(false); }
             };
 
-            // Post to Google Sheet in background
             const pushToGoogleSheet = (action, payload) => {
                 if (!GOOGLE_SHEET_API_URL || GOOGLE_SHEET_API_URL.includes("YOUR_GOOGLE_APPS")) return;
                 fetch(GOOGLE_SHEET_API_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: action, data: payload.data, id: payload.id })
                 }).catch(e => console.error("Sheet push queued:", e));
             };
@@ -112,6 +104,34 @@
 
             return { logs, setLogs, activeSites, setActiveSites, users, setUsers, currentUser, setCurrentUser, pushToGoogleSheet, syncFromGoogleSheet, isSyncing };
         };
+
+        // --- GLOBAL TOAST COMPONENT ---
+        function ToastNotification({ toast, onClose }) {
+            useEffect(() => {
+                if (toast) { const timer = setTimeout(onClose, 3500); return () => clearTimeout(timer); }
+            }, [toast]);
+
+            if (!toast) return null;
+
+            const styles = {
+                success: 'bg-emerald-600 border-emerald-700',
+                error: 'bg-red-600 border-red-700',
+                warning: 'bg-amber-500 border-amber-600'
+            };
+            const icons = {
+                success: 'fa-circle-check',
+                error: 'fa-circle-exclamation',
+                warning: 'fa-triangle-exclamation'
+            };
+
+            return (
+                <div class={`fixed top-4 left-1/2 w-[90%] max-w-sm z-[999] animate-slide-down text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border ${styles[toast.type]}`}>
+                    <i class={`fa-solid ${icons[toast.type]} text-xl`}></i>
+                    <span class="font-bold text-sm leading-tight flex-1">{toast.message}</span>
+                    <button onClick={onClose} class="text-white/70 hover:text-white"><i class="fa-solid fa-times"></i></button>
+                </div>
+            );
+        }
 
         class ErrorBoundary extends React.Component {
             constructor(props) { super(props); this.state = { error: null }; }
@@ -132,15 +152,23 @@
 
         function App() {
             const db = useDatabase();
-            if (!db.currentUser) return <LoginScreen db={db} />;
-            if (db.currentUser.role === 'admin') return <AdminLayout db={db} />;
-            return <CoordinatorApp db={db} />;
+            const [toast, setToast] = useState(null);
+            
+            const showToast = (message, type = 'success') => setToast({ message, type });
+
+            return (
+                <>
+                    <ToastNotification toast={toast} onClose={() => setToast(null)} />
+                    {!db.currentUser ? <LoginScreen db={db} showToast={showToast} /> :
+                     db.currentUser.role === 'admin' ? <AdminLayout db={db} showToast={showToast} /> :
+                     <CoordinatorApp db={db} showToast={showToast} />}
+                </>
+            );
         }
 
-        function LoginScreen({ db }) {
+        function LoginScreen({ db, showToast }) {
             const [email, setEmail] = useState('');
             const [password, setPassword] = useState('');
-            const [error, setError] = useState('');
 
             const handleLogin = (e) => {
                 e.preventDefault();
@@ -149,8 +177,9 @@
                 if (user) {
                     window.location.hash = 'dashboard';
                     db.setCurrentUser(user);
+                    showToast(`Welcome back, ${user.name}!`, "success");
                 } else {
-                    setError('Invalid email or password.');
+                    showToast("Invalid email or password.", "error");
                 }
             };
 
@@ -165,8 +194,6 @@
                     </div>
 
                     <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 w-full max-w-md animate-fade-in">
-                        {error && <div class="bg-red-50 text-red-600 p-3 rounded-xl mb-6 text-sm font-semibold text-center border border-red-100">{error}</div>}
-
                         <form onSubmit={handleLogin} class="space-y-5">
                             <div>
                                 <label class="block text-sm font-bold mb-2 text-slate-700">Email Address</label>
@@ -192,7 +219,7 @@
             );
         }
 
-        function CoordinatorApp({ db }) {
+        function CoordinatorApp({ db, showToast }) {
             const currentUser = db.currentUser;
             const [view, setView] = useState(() => window.location.hash.replace('#', '') || 'home'); 
             const [selectedSite, setSelectedSite] = useState(null);
@@ -207,8 +234,8 @@
             const goBack = () => { window.location.hash && window.location.hash !== '#home' ? window.history.back() : navigateTo('home'); };
             const handleLogout = () => { db.setCurrentUser(null); window.location.hash = ''; };
 
-            if (view === 'checkin') return <CheckInFlow db={db} currentUser={currentUser} goBack={goBack} />;
-            if (view === 'checkout') return <CheckOutFlow db={db} siteToCheckout={selectedSite} goBack={goBack} />;
+            if (view === 'checkin') return <CheckInFlow db={db} currentUser={currentUser} goBack={goBack} showToast={showToast} />;
+            if (view === 'checkout') return <CheckOutFlow db={db} siteToCheckout={selectedSite} goBack={goBack} showToast={showToast} />;
 
             const myActiveSites = db.activeSites.filter(site => String(site.coordinatorId) === String(currentUser.id));
 
@@ -270,7 +297,7 @@
             );
         }
 
-        function CheckInFlow({ db, currentUser, goBack }) {
+        function CheckInFlow({ db, currentUser, goBack, showToast }) {
             const [step, setStep] = useState(1);
             const [formData, setFormData] = useState({ siteName: '', locationDetails: '', workers: '' });
             const [photo, setPhoto] = useState(null);
@@ -284,7 +311,7 @@
                 };
                 db.setActiveSites(prev => [...prev, newSite]);
                 db.pushToGoogleSheet("syncVisit", { data: newSite });
-                alert("Site Check-In Complete!");
+                showToast("Site Check-In Complete!", "success");
                 goBack();
             };
 
@@ -311,12 +338,12 @@
                                     <label class="block text-sm font-bold mb-2 text-slate-700">Workers Present</label>
                                     <input required type="number" class="w-full py-3 px-4 border border-slate-200 rounded-xl focus:border-primary outline-none transition" value={formData.workers} onChange={e => setFormData({...formData, workers: e.target.value})} />
                                 </div>
-                                <button type="submit" class="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-primaryHover transition">Next: Take Photo</button>
+                                <button type="submit" class="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-primaryHover transition">Next: Verify GPS & Photo</button>
                             </form>
                         ) : (
                             <div class="pb-8">
                                 <h2 class="text-2xl font-extrabold text-slate-900 mb-4">Verify Identity</h2>
-                                <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
+                                <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} showToast={showToast} />
                                 {photo && location && (
                                     <button onClick={handleFinalSubmit} class="w-full bg-primary text-white py-4 rounded-xl mt-6 font-bold text-lg hover:bg-primaryHover shadow-lg transition">Confirm & Check In</button>
                                 )}
@@ -327,7 +354,7 @@
             );
         }
 
-        function CheckOutFlow({ db, siteToCheckout, goBack }) {
+        function CheckOutFlow({ db, siteToCheckout, goBack, showToast }) {
             const [notes, setNotes] = useState('');
             const [photo, setPhoto] = useState(null);
             const [location, setLocation] = useState(null);
@@ -339,7 +366,7 @@
                 db.setLogs(prev => [...prev, logEntry]);
                 db.setActiveSites(prev => prev.filter(s => s.id !== siteToCheckout.id));
                 db.pushToGoogleSheet("syncVisit", { data: logEntry });
-                alert("Check-Out Complete!");
+                showToast("Check-Out Complete!", "success");
                 goBack();
             };
 
@@ -354,7 +381,7 @@
                             <label class="block text-sm font-bold text-slate-700 mb-2">Remarks / Summary</label>
                             <textarea class="w-full border border-slate-200 p-4 rounded-xl h-28 focus:border-primary outline-none resize-none transition bg-slate-50" value={notes} onChange={e => setNotes(e.target.value)}></textarea>
                         </div>
-                        <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} />
+                        <CameraAndLocation onCapture={(img, loc) => { setPhoto(img); setLocation(loc); }} showToast={showToast} />
                         {photo && location && (
                             <button onClick={handleFinalSubmit} class="w-full bg-slate-900 text-white py-4 rounded-xl mt-8 font-bold text-lg hover:bg-slate-800 shadow-xl transition">Complete Check-Out</button>
                         )}
@@ -363,11 +390,13 @@
             );
         }
 
-        function CameraAndLocation({ onCapture }) {
+        // --- CAMERA WITH STRICT GPS ENFORCEMENT ---
+        function CameraAndLocation({ onCapture, showToast }) {
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const [stream, setStream] = useState(null);
             const [capturedImg, setCapturedImg] = useState(null);
+            const [loadingGeo, setLoadingGeo] = useState(false);
 
             useEffect(() => { startCamera(); return () => stopCamera(); }, []);
 
@@ -376,50 +405,79 @@
                     const mediaStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
                     setStream(mediaStream);
                     if (videoRef.current) videoRef.current.srcObject = mediaStream;
-                } catch (err) {}
+                } catch (err) {
+                    showToast("Camera access denied. Check your browser permissions.", "error");
+                }
             };
 
             const stopCamera = () => { if (stream) stream.getTracks().forEach(track => track.stop()); };
 
             const captureData = () => {
-                const canvas = canvasRef.current;
-                const video = videoRef.current;
-                canvas.width = 360; 
-                canvas.height = (video.videoHeight / video.videoWidth) * 360;
-                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imgData = canvas.toDataURL('image/jpeg', 0.5); 
-                setCapturedImg(imgData); stopCamera();
-
-                if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(
-                        (position) => onCapture(imgData, { lat: position.coords.latitude, lng: position.coords.longitude }),
-                        () => onCapture(imgData, { lat: 0, lng: 0 }),
-                        { enableHighAccuracy: true, timeout: 4000, maximumAge: 0 }
-                    );
+                if (!navigator.geolocation) {
+                    showToast("Geolocation is not supported by your browser.", "error");
+                    return;
                 }
+
+                setLoadingGeo(true); // Lock the UI overlay
+
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        // GPS Success! Now capture the photo
+                        const canvas = canvasRef.current;
+                        const video = videoRef.current;
+                        canvas.width = 360; 
+                        canvas.height = (video.videoHeight / video.videoWidth) * 360;
+                        canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const imgData = canvas.toDataURL('image/jpeg', 0.5); 
+                        
+                        setCapturedImg(imgData); 
+                        stopCamera();
+                        setLoadingGeo(false);
+                        onCapture(imgData, { lat: position.coords.latitude, lng: position.coords.longitude });
+                    },
+                    (error) => {
+                        // GPS Failed! Reject the capture completely.
+                        setLoadingGeo(false);
+                        showToast("GPS access is required to proceed. Please enable location services and try again.", "error");
+                    },
+                    { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+                );
             };
 
             if (capturedImg) {
                 return (
-                    <div class="relative rounded-2xl overflow-hidden border-4 border-white shadow-md">
+                    <div class="relative rounded-2xl overflow-hidden border-4 border-white shadow-md animate-fade-in">
                         <img src={capturedImg} class="w-full h-64 object-cover" />
-                        <button onClick={() => {setCapturedImg(null); onCapture(null,null); startCamera();}} class="absolute top-3 right-3 bg-white/90 text-slate-800 p-2 rounded-full shadow hover:bg-white"><i class="fa-solid fa-rotate-right"></i></button>
+                        <div class="absolute bottom-0 left-0 right-0 bg-emerald-600/90 text-white p-2 text-center text-xs font-bold flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-location-crosshairs"></i> GPS Secured
+                        </div>
+                        <button onClick={() => {setCapturedImg(null); onCapture(null,null); startCamera();}} class="absolute top-3 right-3 bg-white/90 text-slate-800 p-2 rounded-full shadow hover:bg-white transition"><i class="fa-solid fa-rotate-right"></i></button>
                     </div>
                 );
             }
 
             return (
-                <div class="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[3/4] max-h-[380px]">
+                <div class="relative rounded-2xl overflow-hidden bg-slate-900 aspect-[3/4] max-h-[380px] shadow-inner">
                     <video ref={videoRef} autoPlay playsInline muted class="w-full h-full object-cover"></video>
                     <canvas ref={canvasRef} class="hidden"></canvas>
-                    <div class="absolute bottom-6 left-0 right-0 flex justify-center">
-                        <button onClick={captureData} class="bg-white text-primary w-16 h-16 rounded-full shadow-2xl border-4 border-slate-200/50 flex items-center justify-center hover:scale-105 active:scale-95 transition"><i class="fa-solid fa-camera text-2xl"></i></button>
+                    
+                    {/* GPS Loading Overlay */}
+                    {loadingGeo && (
+                        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex flex-col items-center justify-center z-10 animate-fade-in">
+                            <i class="fa-solid fa-location-crosshairs fa-spin text-primary text-4xl mb-4"></i>
+                            <p class="text-white font-bold text-sm tracking-wide">Locking GPS...</p>
+                            <p class="text-slate-300 text-xs mt-2">Required for Check-In</p>
+                        </div>
+                    )}
+
+                    <div class="absolute bottom-6 left-0 right-0 flex justify-center z-0">
+                        <button onClick={captureData} disabled={loadingGeo} class="bg-white text-primary w-16 h-16 rounded-full shadow-2xl border-4 border-slate-200/50 flex items-center justify-center hover:scale-105 active:scale-95 transition disabled:opacity-50"><i class="fa-solid fa-camera text-2xl"></i></button>
                     </div>
                 </div>
             );
         }
 
-        function AdminLayout({ db }) {
+        function AdminLayout({ db, showToast }) {
             const [currentTab, setCurrentTab] = useState('dashboard');
             const handleLogout = () => { db.setCurrentUser(null); };
 
@@ -456,15 +514,16 @@
                             </select>
                         </div>
                         <header class="hidden md:flex bg-white h-20 border-b border-slate-100 items-center justify-end px-8 z-10 flex-shrink-0">
-                            <div class="flex items-center gap-3 cursor-pointer" onClick={handleLogout} title="Click to Logout">
+                            <div class="flex items-center gap-3 cursor-pointer hover:bg-slate-50 p-2 rounded-lg transition" onClick={handleLogout} title="Click to Logout">
                                 <img src={`https://ui-avatars.com/api/?name=Admin&background=4f46e5&color=fff`} class="w-9 h-9 rounded-full shadow-sm" />
                                 <div class="text-left"><p class="text-sm font-extrabold text-slate-900 leading-tight">Admin</p></div>
+                                <i class="fa-solid fa-sign-out-alt text-slate-400 ml-2"></i>
                             </div>
                         </header>
                         <div class="flex-1 overflow-auto p-4 md:p-8">
                             {currentTab === 'dashboard' && <DashboardView db={db} />}
                             {currentTab === 'logs' && <LogsView db={db} />}
-                            {currentTab === 'users' && <UserManagementView db={db} />}
+                            {currentTab === 'users' && <UserManagementView db={db} showToast={showToast} />}
                         </div>
                     </main>
                 </div>
@@ -494,7 +553,7 @@
                     <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                         <div class="p-6 border-b border-slate-100 flex justify-between items-center">
                             <h3 class="font-bold text-slate-900 text-lg">Today's Visits Feed</h3>
-                            <button onClick={() => db.syncFromGoogleSheet()} class="text-primary text-sm font-bold hover:underline"><i class="fa-solid fa-arrows-rotate mr-1"></i> Refresh</button>
+                            <button onClick={() => db.syncFromGoogleSheet()} class="text-primary text-sm font-bold hover:bg-slate-50 px-3 py-1.5 rounded-lg transition"><i class="fa-solid fa-arrows-rotate mr-1"></i> Sync</button>
                         </div>
                         <div class="overflow-x-auto">
                             <table class="w-full text-left whitespace-nowrap">
@@ -644,30 +703,45 @@
             );
         }
 
-        function UserManagementView({ db }) {
+        function UserManagementView({ db, showToast }) {
             const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'coordinator' });
+            const [userToDelete, setUserToDelete] = useState(null); // Custom Confirmation State
 
             const handleAddUser = (e) => {
                 e.preventDefault();
                 const cleanEmail = newUser.email.trim().toLowerCase();
-                if (db.users.find(u => u.email.toLowerCase() === cleanEmail)) return alert("Email already exists!");
+                if (db.users.find(u => u.email.toLowerCase() === cleanEmail)) return showToast("Email already exists!", "error");
                 const userObj = { ...newUser, email: cleanEmail, id: Date.now().toString() };
                 db.setUsers(prev => [...prev, userObj]);
                 db.pushToGoogleSheet("addUser", { data: userObj });
                 setNewUser({ name: '', email: '', password: '', role: 'coordinator' });
-                alert("User created and saved to Google Sheet!");
+                showToast("User created successfully!", "success");
             };
 
-            const removeUser = (id) => {
-                if (id === '1') return alert("Cannot delete primary admin.");
-                if (confirm("Remove user?")) {
-                    db.setUsers(prev => prev.filter(u => u.id !== id));
-                    db.pushToGoogleSheet("removeUser", { id: id });
-                }
+            const confirmRemove = () => {
+                db.setUsers(prev => prev.filter(u => u.id !== userToDelete));
+                db.pushToGoogleSheet("removeUser", { id: userToDelete });
+                setUserToDelete(null);
+                showToast("User removed.", "success");
             };
 
             return (
-                <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in">
+                <div class="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fade-in relative">
+                    {/* CUSTOM CONFIRMATION MODAL */}
+                    {userToDelete && (
+                        <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+                            <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                                <div class="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4 text-xl"><i class="fa-solid fa-triangle-exclamation"></i></div>
+                                <h3 class="text-xl font-extrabold text-slate-900 mb-2">Remove User?</h3>
+                                <p class="text-sm text-slate-500 mb-6">Are you sure you want to permanently delete this user's access? This cannot be undone.</p>
+                                <div class="flex gap-3">
+                                    <button onClick={() => setUserToDelete(null)} class="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200 transition">Cancel</button>
+                                    <button onClick={confirmRemove} class="flex-1 bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700 transition shadow-lg shadow-red-600/30">Delete</button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div class="lg:col-span-1 bg-white p-6 rounded-2xl shadow-sm border border-slate-100 h-fit">
                         <h3 class="font-extrabold text-lg mb-4 text-slate-900 border-b border-slate-100 pb-2">Create User</h3>
                         <form onSubmit={handleAddUser} class="space-y-4">
@@ -689,7 +763,7 @@
                                     <option value="coordinator">Coordinator</option><option value="admin">Admin</option>
                                 </select>
                             </div>
-                            <button type="submit" class="w-full bg-primary text-white py-3 rounded-lg font-bold hover:bg-primaryHover shadow mt-2">Add User</button>
+                            <button type="submit" class="w-full bg-primary text-white py-3 rounded-lg font-bold hover:bg-primaryHover shadow mt-2 transition">Add User</button>
                         </form>
                     </div>
 
@@ -715,7 +789,11 @@
                                             </span>
                                         </td>
                                         <td class="p-4 text-center">
-                                            {user.id !== '1' && <button onClick={() => removeUser(user.id)} class="text-red-500 hover:bg-red-50 p-2 rounded transition"><i class="fa-solid fa-trash"></i></button>}
+                                            {user.id !== '1' ? (
+                                                <button onClick={() => setUserToDelete(user.id)} class="text-slate-400 hover:text-red-500 hover:bg-red-50 p-2 rounded-lg transition"><i class="fa-solid fa-trash"></i></button>
+                                            ) : (
+                                                <button onClick={() => showToast("Cannot delete the primary admin.", "error")} class="text-slate-300 cursor-not-allowed p-2"><i class="fa-solid fa-trash"></i></button>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
