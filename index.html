@@ -673,7 +673,7 @@
                             </table>
                         </div>
                     </div>
-                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} />}
+                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} showToast={() => {}} />}
                 </div>
             );
         }
@@ -759,16 +759,40 @@
 
         function LogsView({ db, showToast }) {
             const [filterCoordId, setFilterCoordId] = useState('');
-            const [filterDate, setFilterDate] = useState('');
+            const [timeFilter, setTimeFilter] = useState('all'); 
+            const [customDate, setCustomDate] = useState('');
             const [selectedGroup, setSelectedGroup] = useState(null);
 
             const coordinators = db.users.filter(u => u.role === 'coordinator');
             const allLogs = [...db.logs, ...db.activeSites];
 
+            const getStartOfWeek = (d) => { 
+                const dt = new Date(d); 
+                const day = dt.getDay(); 
+                const diff = dt.getDate() - day + (day === 0 ? -6 : 1); 
+                return new Date(dt.setDate(diff)).setHours(0,0,0,0); 
+            };
+
+            const now = new Date();
+            const todayStart = new Date().setHours(0,0,0,0);
+            const thisWeekStart = getStartOfWeek(now);
+            const lastWeekStart = thisWeekStart - 7 * 24 * 60 * 60 * 1000;
+            const lastWeekEnd = thisWeekStart - 1;
+
             const rawFiltered = allLogs.filter(log => {
                 const matchCoord = filterCoordId ? String(log.coordinatorId) === String(filterCoordId) : true;
-                const logDate = log.checkInTime ? new Date(log.checkInTime).toISOString().split('T')[0] : '';
-                const matchDate = filterDate ? logDate === filterDate : true;
+                let matchDate = true;
+
+                if (log.checkInTime) {
+                    const logTime = new Date(log.checkInTime).getTime();
+                    if (timeFilter === 'today') matchDate = logTime >= todayStart;
+                    else if (timeFilter === 'this_week') matchDate = logTime >= thisWeekStart;
+                    else if (timeFilter === 'last_week') matchDate = logTime >= lastWeekStart && logTime <= lastWeekEnd;
+                    else if (timeFilter === 'custom' && customDate) matchDate = log.checkInTime.startsWith(customDate);
+                } else {
+                    matchDate = timeFilter === 'all';
+                }
+
                 return matchCoord && matchDate;
             });
 
@@ -783,156 +807,104 @@
             });
             const groupedLogs = Object.values(groupedMap).sort((a,b) => new Date(b.latestTime) - new Date(a.latestTime));
 
-            // EXECUTIVE MULTI-PAGE TABULAR PDF REPORT WITH PHOTO THUMBNAILS & VISIT STATS
+            // EXPORT BULK PDF WITH PERFECT 5-COLUMN LAYOUT AND VISIBLE IMAGES
             const downloadBulkPDF = (mode) => {
-                showToast("Generating comprehensive PDF report...", "success");
+                showToast("Generating PDF report...", "success");
                 
                 const dataToExport = mode === 'overall' 
-                    ? [...allLogs].sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime)) 
-                    : [...rawFiltered].sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime));
+                    ? allLogs.sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime)) 
+                    : rawFiltered.sort((a,b) => new Date(b.checkInTime) - new Date(a.checkInTime));
 
-                // 1. Calculate Site Visit Frequency (Count of visits per specific site across history)
-                const siteVisitCounts = {};
-                allLogs.forEach(item => {
-                    const sName = (item.siteName || 'Unknown').trim();
-                    siteVisitCounts[sName] = (siteVisitCounts[sName] || 0) + 1;
-                });
+                const cName = filterCoordId ? coordinators.find(c => String(c.id) === String(filterCoordId))?.name : 'All';
+                let dName = 'All Time';
+                if (mode !== 'overall') {
+                    if (timeFilter === 'today') dName = 'Today';
+                    else if (timeFilter === 'this_week') dName = 'This Week';
+                    else if (timeFilter === 'last_week') dName = 'Last Week';
+                    else if (timeFilter === 'custom') dName = customDate || 'All Time';
+                }
+                
+                const filename = mode === 'overall' ? 'SiteTrack_Overall_Report.pdf' : `SiteTrack_Report_${cName.replace(/\s+/g,'_')}_${dName.replace(/\s+/g,'_')}.pdf`;
 
-                const cName = filterCoordId ? coordinators.find(c => String(c.id) === String(filterCoordId))?.name : 'All Coordinators';
-                const dName = filterDate ? filterDate : 'All Time';
-                const filename = mode === 'overall' ? 'SiteTrack_Comprehensive_Report.pdf' : `SiteTrack_Report_${cName.replace(/\s+/g,'_')}_${dName}.pdf`;
+                const container = document.createElement('div');
+                container.style.padding = '20px';
+                container.style.background = 'white';
+                container.style.color = 'black';
+                container.style.width = '1050px';
+                container.style.fontFamily = 'sans-serif';
 
-                // 2. Generate clean, properly aligned table rows
-                let tableRowsHtml = dataToExport.map((v, i) => {
-                    const dateFormatted = v.checkInTime ? new Date(v.checkInTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
-                    const inTime = v.checkInTime ? new Date(v.checkInTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : '-';
-                    const inMapUrl = v.checkInLocation?.lat ? `https://maps.google.com/?q=${v.checkInLocation.lat},${v.checkInLocation.lng}` : null;
-                    const outTime = v.checkOutTime ? new Date(v.checkOutTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }) : null;
-                    const outMapUrl = v.checkOutLocation?.lat ? `https://maps.google.com/?q=${v.checkOutLocation.lat},${v.checkOutLocation.lng}` : null;
-                    const totalVisitsForThisSite = siteVisitCounts[(v.siteName || '').trim()] || 1;
+                let tableRows = dataToExport.map((v, i) => {
+                    const checkInMapUrl = `https://maps.google.com/?q=${v.checkInLocation?.lat},${v.checkInLocation?.lng}`;
+                    const checkOutMapUrl = v.checkOutLocation ? `https://maps.google.com/?q=${v.checkOutLocation?.lat},${v.checkOutLocation?.lng}` : '#';
+                    const inTime = new Date(v.checkInTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+                    const outTime = v.checkOutTime ? new Date(v.checkOutTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}) : 'Pending';
+
+                    const inPhotoHtml = v.checkInPhoto ? `<img src="${v.checkInPhoto}" style="width: 70px; height: auto; border-radius: 4px; border: 1px solid #cbd5e1; margin: 0 auto 6px auto; display: block;" />` : '';
+                    const outPhotoHtml = v.checkOutPhoto ? `<img src="${v.checkOutPhoto}" style="width: 70px; height: auto; border-radius: 4px; border: 1px solid #cbd5e1; margin: 0 auto 6px auto; display: block;" />` : '';
 
                     return `
-                        <tr style="break-inside: avoid; page-break-inside: avoid; border-bottom: 1px solid #e5e7eb;">
-                            <td style="padding: 12px 8px; font-size: 11px; color: #475569; text-align: center; vertical-align: top;">${i + 1}</td>
-                            
-                            <td style="padding: 12px 8px; font-size: 11px; vertical-align: top;">
-                                <div style="font-weight: 700; color: #0f172a; margin-bottom: 4px;">${dateFormatted}</div>
-                                <div style="color: #059669; font-weight: 600; font-size: 10px;">In: ${inTime}</div>
-                                <div style="color: ${outTime ? '#dc2626' : '#64748b'}; font-weight: 600; font-size: 10px; margin-top: 2px;">Out: ${outTime ? outTime : 'Pending'}</div>
+                        <tr style="border-bottom: 1px solid #e2e8f0; page-break-inside: avoid;">
+                            <td style="padding: 12px 8px; text-align: center; font-weight: bold; color: #64748b; font-size: 13px;">${i + 1}</td>
+                            <td style="padding: 12px 8px; text-align: left;">
+                                <div style="font-weight: 800; font-size: 14px; color: #0f172a; margin-bottom: 4px;">${v.siteName}</div>
+                                <div style="font-size: 12px; color: #475569; margin-bottom: 2px;"><strong>Date:</strong> ${new Date(v.checkInTime).toLocaleDateString()}</div>
+                                <div style="font-size: 12px; color: #475569; margin-bottom: 2px;"><strong>Coord:</strong> ${v.coordinatorName}</div>
+                                <div style="font-size: 12px; color: #475569;"><strong>Workers:</strong> ${v.workers}</div>
                             </td>
-
-                            <td style="padding: 12px 8px; vertical-align: top;">
-                                <div style="font-weight: 800; color: #1e40af; font-size: 12px; margin-bottom: 4px;">${v.siteName}</div>
-                                <div style="font-size: 11px; color: #475569; margin-bottom: 6px;">📍 ${v.locationDetails || 'General Zone'}</div>
-                                <div style="font-size: 10px; color: #1e293b; background: #f1f5f9; display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 600;">Total Visits: ${totalVisitsForThisSite}</div>
+                            <td style="padding: 12px 8px; text-align: center;">
+                                <div style="color: #059669; font-weight: bold; font-size: 13px; margin-bottom: 6px;">${inTime}</div>
+                                ${inPhotoHtml}
+                                <a href="${checkInMapUrl}" target="_blank" style="color: #2563eb; font-size: 11px; text-decoration: underline;">View Map</a>
                             </td>
-
-                            <td style="padding: 12px 8px; vertical-align: top;">
-                                <div style="font-weight: 700; color: #0f172a; font-size: 11px;">${v.coordinatorName}</div>
-                                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Workers: ${v.workers || 0}</div>
+                            <td style="padding: 12px 8px; text-align: center;">
+                                ${v.checkOutTime ? `
+                                    <div style="color: #dc2626; font-weight: bold; font-size: 13px; margin-bottom: 6px;">${outTime}</div>
+                                    ${outPhotoHtml}
+                                    <a href="${checkOutMapUrl}" target="_blank" style="color: #2563eb; font-size: 11px; text-decoration: underline;">View Map</a>
+                                ` : `<span style="color: #9ca3af; font-style: italic; font-size: 12px;">Pending Check-Out</span>`}
                             </td>
-
-                            <td style="padding: 12px 8px; vertical-align: top; text-align: center;">
-                                ${v.checkInPhoto ? `
-                                    <a href="${v.checkInPhoto}" target="_blank" style="text-decoration: none; display: block; margin-bottom: 6px;">
-                                        <img src="${v.checkInPhoto}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" />
-                                    </a>
-                                ` : `<div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px; padding: 16px 0; background: #f8fafc; border-radius: 4px;">No Photo</div>`}
-                                
-                                ${inMapUrl ? `
-                                    <a href="${inMapUrl}" target="_blank" style="background: #e0f2fe; color: #0284c7; text-decoration: none; font-size: 10px; font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; border: 1px solid #bae6fd;">🗺️ View Map</a>
-                                ` : `<div style="font-size: 10px; color: #94a3b8; padding: 4px 0;">No GPS</div>`}
-                            </td>
-
-                            <td style="padding: 12px 8px; vertical-align: top; text-align: center;">
-                                ${v.checkOutPhoto ? `
-                                    <a href="${v.checkOutPhoto}" target="_blank" style="text-decoration: none; display: block; margin-bottom: 6px;">
-                                        <img src="${v.checkOutPhoto}" style="width: 48px; height: 48px; object-fit: cover; border-radius: 4px; border: 1px solid #cbd5e1; box-shadow: 0 1px 2px rgba(0,0,0,0.05);" />
-                                    </a>
-                                ` : `<div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px; padding: ${v.checkOutTime ? '16px' : '8px'} 0; background: #f8fafc; border-radius: 4px;">${v.checkOutTime ? 'No Photo' : 'Active'}</div>`}
-
-                                ${outMapUrl ? `
-                                    <a href="${outMapUrl}" target="_blank" style="background: #e0f2fe; color: #0284c7; text-decoration: none; font-size: 10px; font-weight: bold; padding: 4px 8px; border-radius: 4px; display: inline-block; border: 1px solid #bae6fd;">🗺️ View Map</a>
-                                ` : `<div style="font-size: 10px; color: #94a3b8; padding: 4px 0;">${v.checkOutTime ? 'No GPS' : '--'}</div>`}
-                            </td>
-
-                            <td style="padding: 12px 8px; font-size: 11px; color: #334155; vertical-align: top; line-height: 1.5; word-wrap: break-word;">
-                                ${v.notes ? v.notes : '<span style="color: #94a3b8; font-style: italic;">No remarks added.</span>'}
+                            <td style="padding: 12px 8px; text-align: left; font-size: 12px; color: #334155; font-style: italic;">
+                                ${v.notes || '-'}
                             </td>
                         </tr>
                     `;
                 }).join('');
 
-                // 3. Overall Top KPI Calculation
-                const uniqueSitesSet = new Set(dataToExport.map(v => v.siteName));
-                const totalWorkersSum = dataToExport.reduce((acc, curr) => acc + (parseInt(curr.workers) || 0), 0);
-
-                // 4. Build Full Standalone HTML with Rigid Landscape Dimensions (No device scale clipping)
-                const fullReportHtml = `
-                    <div style="width: 1060px; background-color: #ffffff; padding: 24px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; box-sizing: border-box; color: #0f172a;">
-                        
-                        <!-- Header Banner -->
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #4f46e5; padding-bottom: 14px; margin-bottom: 18px; break-inside: avoid;">
-                            <div>
-                                <h1 style="font-size: 24px; font-weight: 900; color: #1e1b4b; margin: 0 0 4px 0; letter-spacing: -0.5px;">SITE TRACK | FIELD OPERATIONS REPORT</h1>
-                                <p style="font-size: 11px; color: #64748b; margin: 0;">Comprehensive verification log including timestamps, identity selfies, and geo-locations</p>
-                            </div>
-                            <div style="text-align: right; font-size: 11px; color: #64748b; line-height: 1.5;">
-                                <div><strong>Coordinator:</strong> <span style="color: #1e293b;">${cName}</span></div>
-                                <div><strong>Date Scope:</strong> <span style="color: #1e293b;">${dName}</span></div>
-                                <div><strong>Generated:</strong> ${new Date().toLocaleString()}</div>
-                            </div>
+                container.innerHTML = `
+                    <div style="padding-bottom: 15px; margin-bottom: 20px; border-bottom: 2px solid #e2e8f0; page-break-after: avoid;">
+                        <h1 style="font-size: 24px; font-weight: 900; color: #0f172a; margin: 0 0 8px 0;">Site Track - Detailed Operations Report</h1>
+                        <div style="display: flex; justify-content: space-between; font-size: 13px; color: #475569; font-weight: bold;">
+                            <span>Type: ${mode === 'overall' ? 'Overall Report' : 'Filtered Report'} | Coord: ${cName} | Time: ${dName}</span>
+                            <span>Total Visits: ${dataToExport.length}</span>
+                            <span>Generated: ${new Date().toLocaleString()}</span>
                         </div>
-
-                        <!-- Top KPI Stats Cards -->
-                        <div style="display: flex; gap: 12px; margin-bottom: 20px; break-inside: avoid;">
-                            <div style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;">
-                                <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Total Visits in Report</div>
-                                <div style="font-size: 20px; font-weight: 900; color: #4f46e5; margin-top: 2px;">${dataToExport.length}</div>
-                            </div>
-                            <div style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;">
-                                <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Distinct Projects</div>
-                                <div style="font-size: 20px; font-weight: 900; color: #0284c7; margin-top: 2px;">${uniqueSitesSet.size}</div>
-                            </div>
-                            <div style="flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 14px;">
-                                <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Total Workers Present</div>
-                                <div style="font-size: 20px; font-weight: 900; color: #d97706; margin-top: 2px;">${totalWorkersSum}</div>
-                            </div>
-                        </div>
-
-                        <!-- Records Table -->
-                        <table style="width: 100%; text-align: left; border-collapse: collapse; table-layout: fixed; font-size: 11px;">
-                            <thead>
-                                <tr style="background-color: #f8fafc; color: #0f172a; border-top: 2px solid #cbd5e1; border-bottom: 2px solid #cbd5e1; break-inside: avoid; page-break-inside: avoid;">
-                                    <th style="padding: 12px 8px; width: 4%; font-weight: 800; text-transform: uppercase; text-align: center;">#</th>
-                                    <th style="padding: 12px 8px; width: 12%; font-weight: 800; text-transform: uppercase;">Date & Time</th>
-                                    <th style="padding: 12px 8px; width: 22%; font-weight: 800; text-transform: uppercase;">Site Details</th>
-                                    <th style="padding: 12px 8px; width: 14%; font-weight: 800; text-transform: uppercase;">Coordinator</th>
-                                    <th style="padding: 12px 8px; width: 13%; text-align: center; font-weight: 800; text-transform: uppercase;">Login</th>
-                                    <th style="padding: 12px 8px; width: 13%; text-align: center; font-weight: 800; text-transform: uppercase;">Logout</th>
-                                    <th style="padding: 12px 8px; width: 22%; font-weight: 800; text-transform: uppercase;">Remarks</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${tableRowsHtml || '<tr><td colspan="7" style="padding: 30px; text-align: center; color: #94a3b8; font-style: italic;">No records found matching filters.</td></tr>'}
-                            </tbody>
-                        </table>
                     </div>
+                    <table style="width: 100%; border-collapse: collapse; font-family: sans-serif;">
+                        <thead>
+                            <tr style="background-color: #f8fafc; border-bottom: 2px solid #cbd5e1;">
+                                <th style="padding: 12px 8px; text-align: center; color: #1e293b; font-size: 13px; width: 5%;">#</th>
+                                <th style="padding: 12px 8px; text-align: left; color: #1e293b; font-size: 13px; width: 25%;">Visit Info</th>
+                                <th style="padding: 12px 8px; text-align: center; color: #1e293b; font-size: 13px; width: 25%;">Check-In</th>
+                                <th style="padding: 12px 8px; text-align: center; color: #1e293b; font-size: 13px; width: 25%;">Check-Out</th>
+                                <th style="padding: 12px 8px; text-align: left; color: #1e293b; font-size: 13px; width: 20%;">Remarks</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows || '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #64748b;">No records to display.</td></tr>'}
+                        </tbody>
+                    </table>
                 `;
 
-                // 5. Render directly through html2pdf with row-split guards
+                document.body.appendChild(container);
+
                 html2pdf().set({
-                    margin: [8, 8, 8, 8],
+                    margin: 0.5,
                     filename: filename,
                     image: { type: 'jpeg', quality: 0.98 },
-                    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' },
-                    pagebreak: { mode: ['css', 'legacy'], avoid: 'tr' }
-                }).from(fullReportHtml).save().then(() => {
-                    showToast("PDF report generated successfully!", "success");
-                }).catch(err => {
-                    console.error("PDF error:", err);
-                    showToast("Error generating PDF.", "error");
+                    html2canvas: { scale: 2, useCORS: true, logging: false },
+                    jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape', compress: true }
+                }).from(container).save().then(() => {
+                    document.body.removeChild(container);
                 });
             };
 
@@ -947,17 +919,32 @@
                         </div>
                         
                         <div class="flex flex-col md:flex-row gap-4 items-end">
-                            <div class="w-full md:w-1/3">
-                                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select Coordinator</label>
+                            <div class="w-full md:w-1/4">
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Coordinator</label>
                                 <select class="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-slate-700 focus:border-primary outline-none bg-slate-50 font-semibold" value={filterCoordId} onChange={e => setFilterCoordId(e.target.value)}>
                                     <option value="">All Coordinators</option>
                                     {coordinators.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                             </div>
+                            
                             <div class="w-full md:w-1/4">
-                                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select Date</label>
-                                <input type="date" class="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-slate-700 focus:border-primary outline-none bg-slate-50 font-semibold" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
+                                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Timeframe</label>
+                                <select class="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-slate-700 focus:border-primary outline-none bg-slate-50 font-semibold" value={timeFilter} onChange={e => { setTimeFilter(e.target.value); if(e.target.value !== 'custom') setCustomDate(''); }}>
+                                    <option value="all">All Time</option>
+                                    <option value="today">Today</option>
+                                    <option value="this_week">This Week</option>
+                                    <option value="last_week">Last Week</option>
+                                    <option value="custom">Custom Date</option>
+                                </select>
                             </div>
+
+                            {timeFilter === 'custom' && (
+                                <div class="w-full md:w-1/4 animate-fade-in">
+                                    <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Select Date</label>
+                                    <input type="date" class="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm text-slate-700 focus:border-primary outline-none bg-slate-50 font-semibold" value={customDate} onChange={e => setCustomDate(e.target.value)} />
+                                </div>
+                            )}
+
                             <div class="w-full md:flex-1 flex gap-3">
                                 <button onClick={() => downloadBulkPDF('filtered')} class="flex-1 bg-indigo-50 text-primary border border-indigo-100 py-3 rounded-xl font-bold hover:bg-indigo-100 transition shadow-sm">
                                     Download Selected
@@ -989,19 +976,32 @@
                                         <td class="p-4 font-bold text-slate-800 text-sm">{group.siteName}</td>
                                         <td class="p-4 font-bold text-sm text-slate-800">{group.coordinatorName}</td>
                                         <td class="p-4 text-center text-sm font-black text-primary bg-indigo-50/30">{group.visits.length}</td>
-                                        <td class="p-4 text-center"><button onClick={() => setSelectedGroup(group)} class="text-primary font-bold text-xs bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View History</button></td>
+                                        <td class="p-4 text-center"><button onClick={() => setSelectedGroup(group)} class="text-primary font-bold text-sm bg-indigo-50 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition">View History</button></td>
                                     </tr>
                                 ))}
                             </tbody>
                         </table>
                     </div>
-                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} />}
+                    {selectedGroup && <LogDetailsModal group={selectedGroup} onClose={() => setSelectedGroup(null)} showToast={showToast} />}
                 </div>
             );
         }
 
-        function LogDetailsModal({ group, onClose }) {
+        function LogDetailsModal({ group, onClose, showToast }) {
             const sortedVisits = [...group.visits].sort((a,b) => new Date(a.checkInTime) - new Date(b.checkInTime));
+
+            // EXPORT SINGLE GROUP PDF WITH CLEAN 5-COLUMN ALIGNMENT
+            const downloadPDF = () => {
+                showToast("Generating PDF report...", "success");
+                const element = document.getElementById('pdf-report-content-hidden');
+                html2pdf().set({ 
+                    margin: 0.5, 
+                    filename: `SiteHistory_${group.siteName.replace(/\s+/g,'_')}.pdf`, 
+                    image: { type: 'jpeg', quality: 0.98 }, 
+                    html2canvas: { scale: 2, useCORS: true, logging: false }, 
+                    jsPDF: { unit: 'in', format: 'letter', orientation: 'landscape', compress: true } 
+                }).from(element).save();
+            };
 
             return (
                 <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 z-50 animate-fade-in">
@@ -1010,6 +1010,9 @@
                         <div class="flex justify-between items-center p-4 sm:p-5 border-b border-slate-100 bg-slate-50 sticky top-0 z-10">
                             <button onClick={onClose} class="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl shadow-sm hover:bg-slate-100 transition active:scale-95 font-bold">
                                 <i class="fa-solid fa-arrow-left"></i> Back
+                            </button>
+                            <button onClick={downloadPDF} class="bg-primary text-white px-4 py-2 rounded-xl font-bold hover:bg-primaryHover text-sm shadow-md transition flex items-center gap-2 active:scale-95">
+                                <i class="fa-solid fa-download"></i> <span class="hidden sm:inline">Download PDF</span>
                             </button>
                         </div>
                         
@@ -1032,26 +1035,22 @@
                                             <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
                                                 <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-In</h4>
                                                 <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkInTime).toLocaleString('en-US')}</p>
-                                                <div class="mb-3">
-                                                    <a href={log.checkInPhoto} target="_blank" class="text-primary font-bold text-sm underline"><i class="fa-solid fa-image mr-1"></i> log in image</a>
+                                                <div class="w-full h-48 bg-slate-100 rounded-lg mb-3 shadow-inner border border-slate-200 flex items-center justify-center overflow-hidden">
+                                                    <img src={log.checkInPhoto} class="max-w-full max-h-full object-contain" />
                                                 </div>
-                                                <p class="text-xs text-slate-500 font-medium mb-2"><i class="fa-solid fa-users mr-1"></i> Workers: {log.workers}</p>
-                                                <div>
-                                                    <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-primary font-bold text-sm underline"><i class="fa-solid fa-location-dot mr-1"></i> log in location</a>
-                                                </div>
+                                                <p class="text-xs text-slate-500 font-medium mb-1"><i class="fa-solid fa-users mr-1"></i> Workers: {log.workers}</p>
+                                                <a href={`https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
                                             </div>
                                             <div class="bg-slate-50 p-4 rounded-xl border border-slate-100">
                                                 <h4 class="font-bold text-slate-800 mb-2 border-b border-slate-200 pb-2 text-sm uppercase">Check-Out</h4>
                                                 {log.checkOutTime ? (
                                                     <>
                                                         <p class="text-sm font-medium mb-3 text-slate-600">{new Date(log.checkOutTime).toLocaleString('en-US')}</p>
-                                                        <div class="mb-3">
-                                                            <a href={log.checkOutPhoto} target="_blank" class="text-primary font-bold text-sm underline"><i class="fa-solid fa-image mr-1"></i> log out image</a>
+                                                        <div class="w-full h-48 bg-slate-100 rounded-lg mb-3 shadow-inner border border-slate-200 flex items-center justify-center overflow-hidden">
+                                                            <img src={log.checkOutPhoto} class="max-w-full max-h-full object-contain" />
                                                         </div>
-                                                        <p class="text-xs text-slate-800 font-medium mb-2 truncate"><i class="fa-solid fa-comment-dots mr-1 text-slate-400"></i> {log.notes || 'No remarks'}</p>
-                                                        <div>
-                                                            <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-primary font-bold text-sm underline"><i class="fa-solid fa-location-dot mr-1"></i> log out location</a>
-                                                        </div>
+                                                        <p class="text-xs text-slate-800 font-medium mb-1 truncate"><i class="fa-solid fa-comment-dots mr-1 text-slate-400"></i> {log.notes || 'No remarks'}</p>
+                                                        <a href={`https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}`} target="_blank" class="text-xs text-primary font-bold hover:underline">View GPS Map</a>
                                                     </>
                                                 ) : (
                                                     <div class="flex flex-col items-center justify-center h-full min-h-[12rem] text-slate-400">
@@ -1066,6 +1065,60 @@
                                 ))}
                             </div>
                         </div>
+
+                        {/* HIDDEN SIMPLE TABLE FOR PDF EXPORT ONLY */}
+                        <div id="pdf-report-content-hidden" class="absolute left-[-10000px] top-0 bg-white p-6 w-[1050px] text-slate-900">
+                            <div style={{ paddingBottom: '15px', marginBottom: '20px', borderBottom: '2px solid #e2e8f0' }}>
+                                <h1 style={{ fontSize: '24px', fontWeight: '900', color: '#0f172a', margin: '0 0 8px 0' }}>{group.siteName} - Attendance & Visit Log</h1>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#475569', fontWeight: 'bold' }}>
+                                    <span>Coordinator: {group.coordinatorName}</span>
+                                    <span>Total Logged Visits: {group.visits.length}</span>
+                                    <span>Generated: {new Date().toLocaleString()}</span>
+                                </div>
+                            </div>
+                            
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'sans-serif' }}>
+                                <thead>
+                                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '2px solid #cbd5e1' }}>
+                                        <th style={{ padding: '12px 8px', textAlign: 'center', color: '#1e293b', fontSize: '13px', width: '5%' }}>#</th>
+                                        <th style={{ padding: '12px 8px', textAlign: 'left', color: '#1e293b', fontSize: '13px', width: '25%' }}>Visit Info</th>
+                                        <th style={{ padding: '12px 8px', textAlign: 'center', color: '#1e293b', fontSize: '13px', width: '25%' }}>Check-In</th>
+                                        <th style={{ padding: '12px 8px', textAlign: 'center', color: '#1e293b', fontSize: '13px', width: '25%' }}>Check-Out</th>
+                                        <th style={{ padding: '12px 8px', textAlign: 'left', color: '#1e293b', fontSize: '13px', width: '20%' }}>Remarks</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {sortedVisits.map((log, index) => {
+                                        const inMap = `https://maps.google.com/?q=${log.checkInLocation?.lat},${log.checkInLocation?.lng}`;
+                                        const outMap = log.checkOutLocation ? `https://maps.google.com/?q=${log.checkOutLocation?.lat},${log.checkOutLocation?.lng}` : '#';
+                                        return (
+                                        <tr key={log.id} style={{ borderBottom: '1px solid #e2e8f0', pageBreakInside: 'avoid' }}>
+                                            <td style={{ padding: '12px 8px', textAlign: 'center', fontWeight: 'bold', color: '#64748b', fontSize: '13px' }}>{index + 1}</td>
+                                            <td style={{ padding: '12px 8px', textAlign: 'left' }}>
+                                                <div style={{ fontWeight: '800', fontSize: '14px', color: '#0f172a', marginBottom: '4px' }}>{new Date(log.checkInTime).toLocaleDateString()}</div>
+                                                <div style={{ fontSize: '12px', color: '#475569', marginBottom: '2px' }}><strong>Workers:</strong> {log.workers}</div>
+                                            </td>
+                                            <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                                                <div style={{ color: '#059669', fontWeight: 'bold', fontSize: '13px', marginBottom: '6px' }}>{new Date(log.checkInTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</div>
+                                                {log.checkInPhoto && <img src={log.checkInPhoto} style={{ width: '70px', height: 'auto', borderRadius: '4px', border: '1px solid #cbd5e1', margin: '0 auto 6px auto', display: 'block' }} />}
+                                                <a href={inMap} target="_blank" style={{ color: '#2563eb', fontSize: '11px', textDecoration: 'underline' }}>View Map</a>
+                                            </td>
+                                            <td style={{ padding: '12px 8px', textAlign: 'center' }}>
+                                                {log.checkOutTime ? (
+                                                    <>
+                                                        <div style={{ color: '#dc2626', fontWeight: 'bold', fontSize: '13px', marginBottom: '6px' }}>{new Date(log.checkOutTime).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'})}</div>
+                                                        {log.checkOutPhoto && <img src={log.checkOutPhoto} style={{ width: '70px', height: 'auto', borderRadius: '4px', border: '1px solid #cbd5e1', margin: '0 auto 6px auto', display: 'block' }} />}
+                                                        <a href={outMap} target="_blank" style={{ color: '#2563eb', fontSize: '11px', textDecoration: 'underline' }}>View Map</a>
+                                                    </>
+                                                ) : <span style={{ color: '#9ca3af', fontStyle: 'italic', fontSize: '12px' }}>Pending Check-Out</span>}
+                                            </td>
+                                            <td style={{ padding: '12px 8px', textAlign: 'left', fontSize: '12px', color: '#334155', fontStyle: 'italic' }}>{log.notes || '-'}</td>
+                                        </tr>
+                                    )})}
+                                </tbody>
+                            </table>
+                        </div>
+
                     </div>
                 </div>
             );
